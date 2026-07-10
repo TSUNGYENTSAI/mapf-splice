@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 mapf-splice-render = "mapf_splice.render:main"
 mapf-splice-run = "mapf_splice.run:main"
+mapf-splice-inspect = "mapf_splice.inspect:main"
 
 [dependency-groups]
 dev = [

@@ -41,13 +41,16 @@ foundation currently includes:
 - append-only event tracing and read-only prospective dependency evidence;
 - plan-version-scoped stable SCC detection, containment, and deterministic
   quiescence;
+- deterministic, schema-versioned runtime replay artifacts and an offline Web
+  Inspector that consumes full simulation snapshots;
 - MAPF solution validation and ADG compilation;
-- a static scenario-review renderer.
+- a legacy static scenario-review renderer.
 
 Confirmed wait-for analysis, hard-deadlock classification, recovery
 orchestration, atomic group plan replacement, recovery ADG execution, metrics,
 and the final animation are not implemented yet. The checked-in image is a
-design-time scenario review, not evidence from a completed simulation.
+design-time scenario review, not evidence from a completed simulation. Runtime
+review now uses generated replay artifacts.
 
 The canonical design documents are:
 
@@ -55,7 +58,38 @@ The canonical design documents are:
 - [system architecture](docs/ARCHITECTURE.md)
 - [demo and article plan](docs/DEMO_AND_BLOG.md)
 
-## Render the scenario design
+## Inspect a runtime replay
+
+Export the canonical scenario from the Python simulation kernel, then open the
+offline inspector:
+
+```bash
+uv run mapf-splice-run \
+  --scenario scenarios/compact-three-robot/scenario.json \
+  --committed-horizon 3 \
+  --until quiescence \
+  --max-ticks 200 \
+  --output artifacts/hero-k3.run.json
+
+uv run mapf-splice-inspect artifacts/hero-k3.run.json
+```
+
+Use the **Stable SCC** bookmark to inspect the full `after-preview` snapshot,
+then step forward to containment drain and quiescence. The browser renders
+positions, plans, committed reservations, preview dependencies, SCC state, and
+trace events already computed by Python. It does not reconstruct state, run
+routing or traffic logic, or load `review.json`.
+
+Each `simulation-run.v0.1` replay contains deterministic full snapshots at
+`tick-start`, `after-completions`, `after-release`, `after-task-advance`,
+`after-admission`, `after-action-start`, and `after-preview`. The JSON Schema is
+under `schemas/`; the inspector assets are packaged in the Python distribution
+and require no network access.
+
+Confirmed hard deadlock, MAPF recovery, and recovery ADG execution are not yet
+represented as runtime states.
+
+## Render the legacy scenario design
 
 The canonical compact scenario separates its map, lifelong workload, and
 review-only route overlay. After `uv sync`, regenerate the checked-in PNG with:
@@ -68,8 +102,9 @@ uv run mapf-splice-render \
   --output docs/assets/compact-three-robot-warehouse.png
 ```
 
-The scenario and review contracts are machine-readable JSON Schemas under
-`schemas/`.
+This compatibility renderer still reads `review.json`. It is a deprecated
+design fixture and is not used by replay export or inspection. Runtime replay
+is the intended source for future screenshots and animation.
 
 ## License
 

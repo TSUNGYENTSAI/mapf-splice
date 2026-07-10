@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MAPF Splice — Runtime Inspector</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="brand"><span class="mark">MS</span><div><strong>MAPF Splice</strong><small>Runtime Inspector</small></div></div>
+      <div class="transport" aria-label="Playback controls">
+        <button id="prevTick" title="Previous tick (Shift + Left)">− Tick</button>
+        <button id="prev" title="Previous checkpoint (Left)">‹</button>
+        <button id="play" class="primary" title="Play or pause (Space)">Play</button>
+        <button id="next" title="Next checkpoint (Right)">›</button>
+        <button id="nextTick" title="Next tick (Shift + Right)">Tick +</button>
+      </div>
+      <div class="frame-readout"><span id="tickLabel">Tick 0</span><strong id="checkpointLabel">tick-start</strong></div>
+      <label class="speed">Speed <select id="speed"><option value="1200">0.5×</option><option value="650" selected>1×</option><option value="300">2×</option><option value="120">4×</option></select></label>
+    </header>
+
+    <main>
+      <section class="panel warehouse-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Authoritative runtime state</p><h1>Warehouse</h1></div><div id="runMeta" class="run-meta"></div></div>
+        <div id="warehouse" class="warehouse" aria-label="Warehouse map"></div>
+        <div class="legend"><span><i class="dot committed"></i>Committed</span><span><i class="dot preview"></i>Preview</span><span><i class="dot dependency"></i>Dependency</span><span><i class="dot contained"></i>Contained</span></div>
+      </section>
+
+      <section class="panel plans-panel">
+        <div class="panel-heading compact"><div><p class="eyebrow">Execution authority</p><h2>Plans &amp; Dependencies</h2></div><span id="planCount" class="pill"></span></div>
+        <div id="plans" class="plans"></div>
+        <aside id="actionDetail" class="detail empty">Select an action to inspect its claims and dependencies.</aside>
+      </section>
+
+      <section class="panel graph-panel">
+        <div class="panel-heading compact"><div><p class="eyebrow">Prospective evidence</p><h2>Dependency graph</h2></div><span id="edgeCount" class="pill"></span></div>
+        <div id="graph" class="graph"></div>
+        <div id="sccs" class="sccs"></div>
+      </section>
+
+      <section class="panel events-panel">
+        <div class="event-head"><div><p class="eyebrow">Trace, never state reconstruction</p><h2>Events</h2></div><div id="bookmarks" class="bookmarks"></div><label>Robot <select id="robotFilter"><option value="">All</option></select></label><label>Kind <select id="kindFilter"><option value="">All</option></select></label></div>
+        <div id="events" class="events"></div>
+      </section>
+    </main>
+
+    <footer class="timeline"><input id="slider" type="range" min="0" value="0"><span id="frameLabel"></span></footer>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
