@@ -95,6 +95,15 @@ class CommittedReservationLedger:
                 )
         return tuple(conflicts)
 
+    def conflicts_for(
+        self,
+        action: Action,
+        *,
+        occupied: Mapping[Cell, str],
+    ) -> tuple[ReservationConflict, ...]:
+        """Report an action's conflicts against current committed state (read-only)."""
+        return self._conflicts_for(action, occupied, self._owners_by_resource)
+
     def _evaluate(
         self,
         actions: Sequence[Action],

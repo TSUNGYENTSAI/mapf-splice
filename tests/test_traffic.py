@@ -200,6 +200,31 @@ def test_batch_arbitration_is_independent_of_request_order() -> None:
     assert forward[1] == (ActionRef("R1", 1, 0),)
 
 
+def test_conflicts_for_reports_committed_and_occupied_blockers() -> None:
+    blocker = _plan((Cell(0, 1), Cell(0, 1)), robot_id="R2")  # WAIT holds (0,1)
+    ledger = CommittedReservationLedger(horizon=1)
+    _initial(ledger, blocker, occupied={Cell(0, 1): "R2"})
+
+    mover = _plan((Cell(0, 0), Cell(0, 1)), robot_id="R1")
+    conflicts = ledger.conflicts_for(
+        mover.actions[0], occupied={Cell(0, 1): "R2", Cell(0, 0): "R1"}
+    )
+
+    vertex = next(c for c in conflicts if c.resource == VertexResource(Cell(0, 1)))
+    assert vertex.reserved_by == (ActionRef("R2", 1, 0),)
+    assert vertex.occupied_by == "R2"
+
+
+def test_conflicts_for_excludes_self_and_is_read_only() -> None:
+    plan = _plan((Cell(0, 0), Cell(0, 1)), robot_id="R1")
+    ledger = CommittedReservationLedger(horizon=1)
+    _initial(ledger, plan, occupied={Cell(0, 0): "R1"})
+    before = ledger.all_committed_actions()
+
+    assert ledger.conflicts_for(plan.actions[0], occupied={Cell(0, 0): "R1"}) == ()
+    assert ledger.all_committed_actions() == before
+
+
 def test_completed_plan_retirement_removes_lifelong_metadata() -> None:
     plan = _plan((Cell(0, 0), Cell(0, 1)))
     ledger = CommittedReservationLedger(horizon=1)
