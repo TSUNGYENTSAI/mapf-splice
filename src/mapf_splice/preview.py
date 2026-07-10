@@ -55,7 +55,7 @@ def resource_label(resource: Resource) -> str:
     return ":".join(str(part) for part in key)
 
 
-def _preview_actions(world: WorldState, plan: Plan) -> tuple[Action, ...]:
+def preview_actions(world: WorldState, plan: Plan) -> tuple[Action, ...]:
     if not world.reservations.plan_initialized(plan):
         return ()
     completed = 0
@@ -73,7 +73,7 @@ def _preview_actions(world: WorldState, plan: Plan) -> tuple[Action, ...]:
 
 def analyze_preview(world: WorldState) -> PreviewAnalysis:
     preview_by_robot = {
-        robot_id: _preview_actions(world, plan)
+        robot_id: preview_actions(world, plan)
         for robot_id, plan in sorted(world.plans.items())
     }
     occupied = world.occupied_cells()

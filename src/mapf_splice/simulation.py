@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from mapf_splice.deadlock import CandidateIdentity, DeadlockController
+from mapf_splice.deadlock import CandidateIdentity, DeadlockController, DeadlockUpdate
 from mapf_splice.delay import DeterministicDelaySchedule
 from mapf_splice.dispatch import dispatch_pending_tasks
 from mapf_splice.domain import Action, ActionStatus, Cell, TaskStatus
-from mapf_splice.preview import analyze_preview, resource_label
+from mapf_splice.preview import PreviewAnalysis, analyze_preview, resource_label
+from mapf_splice.replay import FrameRecorder
 from mapf_splice.routing import NoPath
 from mapf_splice.scenario import ScenarioBundle, build_initial_world
 from mapf_splice.tasking import (
@@ -28,6 +29,7 @@ class DeterministicSimulator:
     base_action_duration_ticks: int = 1
     trace: EventTrace = field(default_factory=EventTrace)
     deadlock_controller: DeadlockController = field(default_factory=DeadlockController)
+    recorder: FrameRecorder | None = None
 
     def __post_init__(self) -> None:
         if self.base_action_duration_ticks < 1:
@@ -355,7 +357,7 @@ class DeterministicSimulator:
             )
         self.world.validate()
 
-    def _preview(self) -> None:
+    def _preview(self) -> tuple[PreviewAnalysis, DeadlockUpdate]:
         analysis = analyze_preview(self.world)
         for dependency in analysis.dependencies:
             self.trace.append(
@@ -424,6 +426,7 @@ class DeterministicSimulator:
                 kind=EventKind.QUIESCENCE_REACHED,
                 details=(("members", self._identity_label(identity)),),
             )
+        return analysis, update
 
     @staticmethod
     def _identity_label(identity: CandidateIdentity) -> str:
@@ -432,12 +435,23 @@ class DeterministicSimulator:
         )
 
     def tick(self) -> None:
+        self._record("tick-start")
         due = self._complete_due_actions()
+        self._record("after-completions")
         self._release_completed(due)
+        self._record("after-release")
         self._advance_tasks()
+        self._record("after-task-advance")
         self._admit()
+        self._record("after-admission")
         self._start_actions()
-        self._preview()
+        self._record("after-action-start")
+        analysis, update = self._preview()
+        self._record(
+            "after-preview",
+            preview_analysis=analysis,
+            deadlock_update=update,
+        )
         self.trace.append(
             tick=self.world.tick,
             phase=TickPhase.ADVANCE_TICK,
@@ -445,3 +459,20 @@ class DeterministicSimulator:
             details=(("next_tick", self.world.tick + 1),),
         )
         self.world.tick += 1
+
+    def _record(
+        self,
+        checkpoint: str,
+        *,
+        preview_analysis: PreviewAnalysis | None = None,
+        deadlock_update: DeadlockUpdate | None = None,
+    ) -> None:
+        if self.recorder is not None:
+            self.recorder.record(
+                checkpoint=checkpoint,
+                world=self.world,
+                controller=self.deadlock_controller,
+                trace=self.trace,
+                preview_analysis=preview_analysis,
+                deadlock_update=deadlock_update,
+            )

@@ -353,3 +353,14 @@ class CommittedReservationLedger:
 
     def all_committed_actions(self) -> tuple[ActionRef, ...]:
         return tuple(sorted(self._resources_by_action))
+
+    def reservation_snapshot(
+        self,
+    ) -> tuple[tuple[Resource, tuple[ActionRef, ...]], ...]:
+        """Return immutable, deterministically ordered committed ownership."""
+        return tuple(
+            (resource, tuple(sorted(owners)))
+            for resource, owners in sorted(
+                self._owners_by_resource.items(), key=lambda item: repr(item[0])
+            )
+        )

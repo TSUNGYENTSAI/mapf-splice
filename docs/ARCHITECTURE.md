@@ -42,6 +42,8 @@ flowchart TD
     RiskGraph --> Trace
     Confirm --> Trace
     MAPF --> Trace
+    Trace --> Replay[Immutable full-snapshot replay]
+    Replay --> Inspector[Offline Web Inspector]
 ```
 
 ## Proposed modules
@@ -117,15 +119,15 @@ state separate:
   generator. Experiments still use a finite tick horizon so modes can be
   compared reproducibly.
 - Review overlays contain derived routes, route indices, and prospective
-  dependencies for design-time rendering. They are not runtime truth and will
-  be replaced by trace-derived frames once the simulator exists.
+  dependencies only for the deprecated design-time renderer. They are not
+  runtime truth and never feed the runtime replay exporter or inspector.
 
 Cross-file validation checks map symbols, station references, unique initial
 occupancy, exact parity between review routes and deterministic A*, route
 adjacency, vertex/edge committed-claim exclusivity, and whether declared
 preview dependencies match occupied or committed resources. Review data is
-temporary executable scenario design input; it must not be treated as runtime
-evidence or extended into a second traffic implementation.
+temporary compatibility input for static design rendering; it must not be
+treated as runtime evidence or extended into a second traffic implementation.
 
 Both scenario and review loaders apply the same boundary pipeline: JSON parse,
 Draft 2020-12 schema validation, then cross-file semantic validation. Unknown
@@ -299,19 +301,22 @@ without nondeterministic threads.
 The simulator owns a deterministic phased tick loop and configured action-delay
 schedule. Each tick completes due actions, releases resources, evaluates new
 requests from a stable snapshot, starts admitted actions, and records trace
-output in a fixed order. Metrics and visualization consume the append-only trace
-rather than reading or mutating the execution kernel.
+output in a fixed order. A read-only recorder captures full immutable snapshots
+at seven named checkpoints without advancing actions or changing reservations.
 
-The static scenario renderer is a design tool, not part of the execution
-kernel. It uses the same map and validated review-frame contract so early
-bitmaps can later be regenerated from trace-derived state without moving traffic
-logic into visualization.
+The schema-versioned replay embeds map topology, authoritative world state,
+plans, action authority, reservations, preview evidence, controller state, and
+new trace events. The offline Web Inspector is a pure replay consumer: playback
+only selects a frame and the browser does not calculate routing, reservations,
+dependencies, SCCs, containment, or quiescence. The old `review.json` renderer
+remains a deprecated design tool and is not part of this runtime path.
 
 `WorldState` is the one mutable authority for the current tick, robots, tasks,
 current plans, and committed reservation ledger. It validates unique occupancy,
 bidirectional task assignments, payload consistency, current plan versions, and
-reservation ownership. History will be reconstructed from the append-only
-trace; the simulator does not deep-copy a world snapshot on every tick.
+reservation ownership. The normal kernel keeps only current state and an
+append-only trace. Full history snapshots are created only when the optional
+recorder is attached.
 An idle robot cannot retain a current plan, active action, payload, or committed
 reservation. These aggregate rules are validated before assignment so a failed
 dispatch choice cannot leave a one-sided task/robot mutation.

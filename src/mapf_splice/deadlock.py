@@ -32,6 +32,27 @@ class DeadlockUpdate:
     expired: tuple[CandidateIdentity, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class DeadlockCandidateSnapshot:
+    identity: CandidateIdentity
+    observation_count: int
+    stable: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ContainmentSnapshot:
+    identity: CandidateIdentity
+    valid: bool
+    quiescence_emitted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DeadlockControllerSnapshot:
+    threshold: int
+    candidates: tuple[DeadlockCandidateSnapshot, ...]
+    containments: tuple[ContainmentSnapshot, ...]
+
+
 def cyclic_sccs(analysis: PreviewAnalysis) -> tuple[tuple[str, ...], ...]:
     graph: dict[str, set[str]] = {}
     for dependency in analysis.dependencies:
@@ -94,6 +115,29 @@ class DeadlockController:
     @property
     def containments(self) -> tuple[Containment, ...]:
         return tuple(self._containments[key] for key in sorted(self._containments))
+
+    def snapshot(self, world: WorldState) -> DeadlockControllerSnapshot:
+        """Expose controller state without leaking its mutable dictionaries."""
+        self._refresh_containments(world)
+        return DeadlockControllerSnapshot(
+            threshold=self.stable_scc_observation_threshold,
+            candidates=tuple(
+                DeadlockCandidateSnapshot(
+                    identity=identity,
+                    observation_count=count,
+                    stable=identity in self._containments,
+                )
+                for identity, count in sorted(self._counts.items())
+            ),
+            containments=tuple(
+                ContainmentSnapshot(
+                    identity=identity,
+                    valid=containment.valid,
+                    quiescence_emitted=containment.quiescence_emitted,
+                )
+                for identity, containment in sorted(self._containments.items())
+            ),
+        )
 
     def observe(
         self,

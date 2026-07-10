@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 mapf-splice-render = "mapf_splice.render:main"
+mapf-splice-run = "mapf_splice.run:main"
 
 [dependency-groups]
 dev = [
@@ -25,6 +26,12 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mapf_splice"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas/simulation-run.v0.1.schema.json" = "mapf_splice/schemas/simulation-run.v0.1.schema.json"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "schemas", "tests", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
