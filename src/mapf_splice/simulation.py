@@ -7,6 +7,7 @@ from mapf_splice.deadlock import CandidateIdentity, DeadlockController, Deadlock
 from mapf_splice.delay import DeterministicDelaySchedule
 from mapf_splice.dispatch import dispatch_pending_tasks
 from mapf_splice.domain import Action, ActionStatus, Cell, TaskStatus
+from mapf_splice.planning import next_required_action
 from mapf_splice.preview import PreviewAnalysis, analyze_preview, resource_label
 from mapf_splice.replay import FrameRecorder
 from mapf_splice.routing import NoPath
@@ -308,14 +309,7 @@ class DeterministicSimulator:
             if robot.active_action_ref is not None or robot_id not in self.world.plans:
                 continue
             plan = self.world.plans[robot_id]
-            action = next(
-                (
-                    candidate
-                    for candidate in plan.actions
-                    if candidate.status is not ActionStatus.COMPLETED
-                ),
-                None,
-            )
+            action = next_required_action(plan)
             if action is None or action.status is not ActionStatus.PLANNED:
                 continue
             committed = self.world.reservations.committed_actions(

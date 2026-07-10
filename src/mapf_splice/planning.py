@@ -6,6 +6,7 @@ from mapf_splice.domain import (
     Action,
     ActionKind,
     ActionRef,
+    ActionStatus,
     Cell,
     DomainError,
     Plan,
@@ -53,3 +54,24 @@ def compile_path(
         phase_goal=cells[-1],
         actions=tuple(actions),
     )
+
+
+def completed_prefix_length(plan: Plan) -> int:
+    """Count leading COMPLETED actions; the completed set must be a prefix."""
+    prefix = 0
+    while (
+        prefix < len(plan.actions)
+        and plan.actions[prefix].status is ActionStatus.COMPLETED
+    ):
+        prefix += 1
+    if any(
+        action.status is ActionStatus.COMPLETED for action in plan.actions[prefix:]
+    ):
+        raise DomainError("completed actions must form a sequential prefix")
+    return prefix
+
+
+def next_required_action(plan: Plan) -> Action | None:
+    """The first action the robot has not COMPLETED, or None if the plan is done."""
+    index = completed_prefix_length(plan)
+    return plan.actions[index] if index < len(plan.actions) else None
