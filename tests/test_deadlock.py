@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from mapf_splice.deadlock import DeadlockController, cyclic_sccs
+from mapf_splice.confirm import ConfirmedWaitForGraph
+from mapf_splice.deadlock import (
+    ConfirmationOutcome,
+    ContainmentState,
+    DeadlockController,
+    classify_confirmation,
+    cyclic_sccs,
+)
 from mapf_splice.domain import (
     ActionRef,
     Cell,
@@ -171,7 +178,7 @@ def test_new_plan_version_is_not_captured_by_stale_containment() -> None:
     controller.refresh(world)
 
     assert not controller.is_contained(replacement)
-    assert not controller.containments[0].valid
+    assert controller.containments[0].state is ContainmentState.INVALIDATED
 
 
 def test_snapshot_is_read_only_and_refresh_is_explicit() -> None:
@@ -179,13 +186,15 @@ def test_snapshot_is_read_only_and_refresh_is_explicit() -> None:
 
     # snapshot() serializes existing state; it must not invalidate the now-stale
     # containment as a side effect of being observed.
-    assert controller.snapshot().containments[0].valid is True
-    assert controller.containments[0].valid is True
+    assert controller.snapshot().containments[0].state is ContainmentState.DRAINING
+    assert controller.containments[0].state is ContainmentState.DRAINING
 
     # Invalidation happens only when the control phase explicitly refreshes.
     controller.refresh(world)
-    assert controller.containments[0].valid is False
-    assert controller.snapshot().containments[0].valid is False
+    assert controller.containments[0].state is ContainmentState.INVALIDATED
+    assert (
+        controller.snapshot().containments[0].state is ContainmentState.INVALIDATED
+    )
 
 
 @pytest.mark.parametrize(
@@ -348,3 +357,117 @@ def test_containment_emits_quiescence_only_once() -> None:
         )
         == 1
     )
+
+
+def _quiescent_scope(routes):
+    """A controller with an already-quiescent containment over `routes`' robots.
+
+    (compile_path is already imported at the top of this module.)
+    """
+    starts = {robot_id: route[0] for robot_id, route in routes.items()}
+    robots = {
+        robot_id: Robot(robot_id, start, active_task_id=f"T-{robot_id}")
+        for robot_id, start in starts.items()
+    }
+    tasks = {
+        f"T-{robot_id}": Task(
+            f"T-{robot_id}", start, routes[robot_id][-1], 0,
+            TaskStatus.ASSIGNED, robot_id,
+        )
+        for robot_id, start in starts.items()
+    }
+    world = WorldState(
+        reservations=CommittedReservationLedger(1), robots=robots, tasks=tasks
+    )
+    for robot_id in sorted(routes):
+        plan = compile_path(
+            routes[robot_id], robot_id=robot_id, plan_version=1,
+            task_id=f"T-{robot_id}",
+        )
+        world.install_plan(plan)
+        tasks[f"T-{robot_id}"].transition_to(TaskStatus.TO_PICKUP)
+    controller = DeadlockController(1)
+    scope = tuple((robot_id, 1) for robot_id in sorted(routes))
+    edges = tuple((a, b) for a in sorted(routes) for b in sorted(routes) if a != b)
+    controller.observe(_analysis(*edges), {robot_id: 1 for robot_id in routes})
+    controller.refresh(world)
+    controller.newly_quiescent(world)
+    return controller, world, scope
+
+
+def test_confirm_marks_hard_deadlock_on_internal_cycle() -> None:
+    controller, world, scope = _quiescent_scope(
+        {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(0, 1), Cell(0, 0))}
+    )
+    results = controller.confirm(world, tick=18)
+    assert len(results) == 1
+    assert results[0].outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK
+    assert controller.containments[0].state is ContainmentState.CONFIRMED_DEADLOCK
+    assert controller.containments[0].confirmation_tick == 18
+
+
+def test_confirm_clears_when_graph_is_acyclic_and_local() -> None:
+    controller, world, scope = _quiescent_scope(
+        {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(2, 0), Cell(2, 1))}
+    )
+    results = controller.confirm(world, tick=12)
+    assert results[0].outcome is ConfirmationOutcome.CLEAR
+    assert controller.containments[0].state is ContainmentState.CLEARED
+
+
+def test_cleared_containment_is_pruned_and_counts_reset() -> None:
+    controller, world, scope = _quiescent_scope(
+        {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(2, 0), Cell(2, 1))}
+    )
+    controller.confirm(world, tick=12)
+    controller.prune_resolved()
+    assert controller.containments == ()
+    update = controller.observe(
+        _analysis(("R1", "R2"), ("R2", "R1")), {"R1": 1, "R2": 1}
+    )
+    assert update.observations[0].count == 1
+
+
+def test_external_blocked_holds_then_reevaluates_to_clear() -> None:
+    # A 2-robot scope (so a cyclic SCC can form the containment), but the
+    # confirmed graph has no internal cycle -- only R1 blocked by external R3.
+    controller, world, scope = _quiescent_scope(
+        {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(5, 0), Cell(5, 1))}
+    )
+    world.robots["R3"] = Robot("R3", Cell(0, 1))  # external blocker on R1's target
+    world.validate()
+    first = controller.confirm(world, tick=5)
+    assert first[0].outcome is ConfirmationOutcome.EXTERNAL_DEPENDENCY
+    assert controller.containments[0].state is ContainmentState.EXTERNAL_BLOCKED
+    # external robot leaves; re-evaluation clears
+    world.robots["R3"].position = Cell(9, 9)
+    world.validate()
+    second = controller.confirm(world, tick=6)
+    assert second[0].outcome is ConfirmationOutcome.CLEAR
+    assert controller.containments[0].state is ContainmentState.CLEARED
+
+
+def test_overlapping_scc_does_not_accumulate_while_suppressed() -> None:
+    controller = DeadlockController(2)
+    controller.observe(_analysis(("R1", "R2"), ("R2", "R1")), {"R1": 1, "R2": 1})
+    controller.observe(_analysis(("R1", "R2"), ("R2", "R1")), {"R1": 1, "R2": 1})
+    assert controller.containments[0].state is ContainmentState.DRAINING
+    superset = _analysis(("R1", "R2"), ("R2", "R3"), ("R3", "R1"))
+    versions = {"R1": 1, "R2": 1, "R3": 1}
+    controller.observe(superset, versions)
+    second = controller.observe(superset, versions)
+    superset_obs = next(
+        o
+        for o in second.observations
+        if o.identity == (("R1", 1), ("R2", 1), ("R3", 1))
+    )
+    assert superset_obs.suppressed is True
+    assert superset_obs.count == 0
+
+
+def test_classify_confirmation_prefers_internal_cycle() -> None:
+    graph = ConfirmedWaitForGraph(
+        scope=(("R1", 1), ("R2", 1)), epoch=1, captured_at_tick=0, edges=(),
+        cyclic_sccs=(("R1", "R2"),),
+    )
+    assert classify_confirmation(graph) is ConfirmationOutcome.CONFIRMED_DEADLOCK

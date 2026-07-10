@@ -10,7 +10,12 @@ from typing import Any
 
 import jsonschema
 
-from mapf_splice.deadlock import DeadlockController, DeadlockUpdate, cyclic_sccs
+from mapf_splice.deadlock import (
+    ACTIVE_STATES,
+    DeadlockController,
+    DeadlockUpdate,
+    cyclic_sccs,
+)
 from mapf_splice.domain import ActionRef, EdgeResource, Resource, VertexResource
 from mapf_splice.preview import PreviewAnalysis, preview_actions
 from mapf_splice.scenario import ScenarioBundle
@@ -106,7 +111,7 @@ class FrameRecorder:
         contained_members = {
             member: index
             for index, containment in enumerate(controller_state.containments)
-            if containment.valid
+            if containment.state in ACTIVE_STATES
             for member in containment.identity
         }
         robots = []
@@ -242,8 +247,10 @@ class FrameRecorder:
                     "containments": [
                         {
                             "identity": _identity(item.identity),
-                            "valid": item.valid,
-                            "quiescence_emitted": item.quiescence_emitted,
+                            "epoch": item.epoch,
+                            "state": item.state.value,
+                            "confirmation_tick": item.confirmation_tick,
+                            "outcome": item.outcome.value if item.outcome else None,
                         }
                         for item in controller_state.containments
                     ],
