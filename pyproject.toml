@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mapf-splice"
+version = "0.0.0"
+description = "On-demand MAPF deadlock recovery for continuous robot fleets"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+  "pillow>=10,<13",
+]
+
+[project.scripts]
+mapf-splice-render = "mapf_splice.render:main"
+
+[dependency-groups]
+dev = [
+  "jsonschema>=4,<5",
+  "pytest>=8,<9",
+  "ruff>=0.9,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mapf_splice"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
