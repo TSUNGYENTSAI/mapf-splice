@@ -17,8 +17,9 @@ class TickPhase(IntEnum):
     COLLECT_STARTS = 8
     START_ACTIONS = 9
     PREVIEW = 10
-    APPEND_EVENTS = 11
-    ADVANCE_TICK = 12
+    CONFIRM_DEADLOCK = 11
+    APPEND_EVENTS = 12
+    ADVANCE_TICK = 13
 
 
 class EventKind(StrEnum):
@@ -38,6 +39,11 @@ class EventKind(StrEnum):
     CONTAINMENT_STARTED = "containment-started"
     CANDIDATE_EXPIRED = "candidate-expired"
     QUIESCENCE_REACHED = "quiescence-reached"
+    CONFIRMED_WAIT_FOR_BUILT = "confirmed-wait-for-built"
+    HARD_DEADLOCK_CONFIRMED = "hard-deadlock-confirmed"
+    CONTAINMENT_EXTERNAL_BLOCKED = "containment-external-blocked"
+    CONTAINMENT_CLEARED = "containment-cleared"
+    CONTAINMENT_INVALIDATED = "containment-invalidated"
     TICK_ADVANCED = "tick-advanced"
 
 
