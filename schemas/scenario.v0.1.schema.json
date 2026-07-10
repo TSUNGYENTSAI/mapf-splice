@@ -97,7 +97,7 @@
             "properties": {
               "id": {"$ref": "#/$defs/id"},
               "start_station_id": {"$ref": "#/$defs/id"},
-              "initial_payload": {"enum": ["empty", "carrying"]}
+              "initial_payload": {"const": "empty"}
             }
           }
         }
@@ -106,9 +106,10 @@
     "dispatcher": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["policy", "tie_breaker"],
+      "required": ["policy", "task_order", "tie_breaker"],
       "properties": {
         "policy": {"const": "nearest_idle"},
+        "task_order": {"const": "release_tick_then_task_id"},
         "tie_breaker": {"const": "robot_id"}
       }
     },
@@ -137,7 +138,9 @@
           "properties": {
             "type": {"const": "seeded_station_pairs"},
             "seed": {"type": "integer", "minimum": 0},
-            "release_interval_ticks": {"$ref": "#/$defs/integer_range"},
+            "release_interval_ticks": {
+              "$ref": "#/$defs/positive_integer_range"
+            },
             "max_pending_tasks": {"type": "integer", "minimum": 1},
             "pickup_station_ids": {
               "type": "array",
@@ -194,6 +197,15 @@
       "required": ["default", "minimum", "maximum"],
       "properties": {
         "default": {"type": "integer", "minimum": 1},
+        "minimum": {"type": "integer", "minimum": 1},
+        "maximum": {"type": "integer", "minimum": 1}
+      }
+    },
+    "positive_integer_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum"],
+      "properties": {
         "minimum": {"type": "integer", "minimum": 1},
         "maximum": {"type": "integer", "minimum": 1}
       }

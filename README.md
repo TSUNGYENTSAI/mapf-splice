@@ -34,13 +34,17 @@ foundation currently includes:
 - schema and cross-file validation for the compact hero scenario;
 - deterministic single-agent A* and executable hero-route expectations;
 - typed robots, tasks, versioned plans, move/wait actions, and resources;
+- authoritative world state, deterministic dispatch, and task-phase
+  orchestration;
+- atomic committed-droplet admission with rolling release and replenishment;
 - MAPF solution validation and ADG compilation;
 - a static scenario-review renderer.
 
-Traffic admission, deadlock confirmation, recovery orchestration, atomic group
-plan replacement, dependency-aware execution, event traces, metrics, and the
-final animation are not implemented yet. The checked-in image is a design-time
-scenario review, not evidence from a completed simulation.
+Preview analysis, deadlock confirmation, recovery orchestration, atomic group
+plan replacement, dependency-aware execution, the phased simulator, event
+traces, metrics, and the final animation are not implemented yet. The
+checked-in image is a design-time scenario review, not evidence from a
+completed simulation.
 
 The canonical design documents are:
 

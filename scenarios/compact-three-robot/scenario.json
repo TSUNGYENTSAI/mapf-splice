@@ -41,6 +41,7 @@
   },
   "dispatcher": {
     "policy": "nearest_idle",
+    "task_order": "release_tick_then_task_id",
     "tie_breaker": "robot_id"
   },
   "task_stream": {

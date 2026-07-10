@@ -5,8 +5,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mapf_splice.domain import Cell, EdgeResource, Resource, VertexResource
+import jsonschema
+
+from mapf_splice.domain import (
+    Cell,
+    EdgeResource,
+    Resource,
+    Robot,
+    Task,
+    VertexResource,
+)
 from mapf_splice.routing import RoutePath, find_path
+from mapf_splice.traffic import CommittedReservationLedger
+from mapf_splice.world import WorldState
 
 
 class ScenarioError(ValueError):
@@ -46,10 +57,32 @@ class ScenarioBundle:
 
 
 def load_json(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as file:
-        value = json.load(file)
+    path = path.resolve()
+    try:
+        with path.open(encoding="utf-8") as file:
+            value = json.load(file)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ScenarioError(f"cannot parse JSON document {path}: {error}") from error
     if not isinstance(value, dict):
         raise ScenarioError(f"expected JSON object: {path}")
+    schema_reference = value.get("$schema")
+    if not isinstance(schema_reference, str) or not schema_reference:
+        raise ScenarioError(f"JSON document does not declare $schema: {path}")
+    schema_path = (path.parent / schema_reference).resolve()
+    try:
+        with schema_path.open(encoding="utf-8") as file:
+            schema = json.load(file)
+        jsonschema.Draft202012Validator.check_schema(schema)
+        jsonschema.Draft202012Validator(schema).validate(value)
+    except (OSError, json.JSONDecodeError, jsonschema.SchemaError) as error:
+        raise ScenarioError(
+            f"cannot load JSON schema {schema_path}: {error}"
+        ) from error
+    except jsonschema.ValidationError as error:
+        location = ".".join(str(part) for part in error.absolute_path) or "<root>"
+        raise ScenarioError(
+            f"schema validation failed at {location}: {error.message}"
+        ) from error
     return value
 
 
@@ -158,6 +191,46 @@ def load_scenario(path: Path) -> ScenarioBundle:
         data=data,
         warehouse_map=warehouse_map,
         stations=stations,
+    )
+
+
+def build_initial_world(
+    scenario: ScenarioBundle,
+    *,
+    committed_horizon: int | None = None,
+) -> WorldState:
+    data = scenario.data
+    configured_horizon = data["traffic"]["committed_horizon"]
+    horizon = configured_horizon["default"]
+    if committed_horizon is not None:
+        horizon = committed_horizon
+    if not configured_horizon["minimum"] <= horizon <= configured_horizon["maximum"]:
+        raise ScenarioError("committed horizon is outside the scenario range")
+
+    robots: dict[str, Robot] = {}
+    for value in data["fleet"]["robots"]:
+        if value["initial_payload"] != "empty":
+            raise ScenarioError(
+                "runtime bootstrap requires an explicit task for carrying payloads"
+            )
+        robots[value["id"]] = Robot(
+            id=value["id"],
+            position=scenario.stations[value["start_station_id"]],
+        )
+
+    tasks = {
+        value["id"]: Task(
+            id=value["id"],
+            pickup=scenario.stations[value["pickup_station_id"]],
+            dropoff=scenario.stations[value["delivery_station_id"]],
+            release_tick=value["release_tick"],
+        )
+        for value in data["task_stream"]["initial_tasks"]
+    }
+    return WorldState(
+        reservations=CommittedReservationLedger(horizon=horizon),
+        robots=robots,
+        tasks=tasks,
     )
 
 

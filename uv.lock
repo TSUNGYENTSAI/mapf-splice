@@ -61,22 +61,24 @@ name = "mapf-splice"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "jsonschema" },
     { name = "pillow" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "jsonschema" },
     { name = "pytest" },
     { name = "ruff" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pillow", specifier = ">=10,<13" }]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4,<5" },
+    { name = "pillow", specifier = ">=10,<13" },
+]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "jsonschema", specifier = ">=4,<5" },
     { name = "pytest", specifier = ">=8,<9" },
     { name = "ruff", specifier = ">=0.9,<1" },
 ]

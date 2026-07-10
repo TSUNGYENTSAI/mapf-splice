@@ -84,6 +84,26 @@ Produces deterministic pickup-and-delivery work and assigns idle robots. The
 dispatcher deliberately uses a simple policy such as nearest-idle assignment;
 dispatch optimization is not part of the project's claim.
 
+The v0.1 dispatcher processes released pending tasks by `(release_tick,
+task_id)`. For each task it selects the idle robot with the shortest static A*
+path to pickup, breaking equal distances by `robot_id`; unreachable robots are
+not candidates. Assignment atomically updates both the task assignee and the
+robot's active task.
+
+Task-phase orchestration preserves every declared status. Installing a valid
+pickup plan changes `assigned` to `to-pickup`; arrival changes it to `carrying`
+and attaches the task payload to the robot. Installing the drop-off plan changes
+it to `to-drop-off`; arrival clears the payload and active assignment only when
+the task becomes `completed`. A robot already on the pickup cell receives an
+empty versioned pickup plan and still passes through each transition. A no-path
+result changes neither status nor plan version.
+
+Pickup and drop-off completion use the same quiescence gate: no action may be
+running, no committed action may remain, and every action in the current phase
+plan must be complete. Task assignment is a `WorldState` aggregate transition;
+the dispatcher selects a pair but does not mutate the robot and task
+independently.
+
 ### Scenario and workload data
 
 Scenario inputs keep static topology, runtime policy, and derived visualization
@@ -106,6 +126,12 @@ adjacency, vertex/edge committed-claim exclusivity, and whether declared
 preview dependencies match occupied or committed resources. Review data is
 temporary executable scenario design input; it must not be treated as runtime
 evidence or extended into a second traffic implementation.
+
+Both scenario and review loaders apply the same boundary pipeline: JSON parse,
+Draft 2020-12 schema validation, then cross-file semantic validation. Unknown
+properties are rejected at runtime, not only in tests. v0.1 bootstrap robots
+must be empty because a carrying bootstrap would require an explicit payload
+task and phase state. Lifelong task release intervals must be positive.
 
 ### Routing
 
@@ -135,6 +161,21 @@ Traffic separates exclusive motion authority from read-only prediction:
   droplets while already authorized progress drains to a deterministic stop.
 
 Traffic does not classify deadlocks or invoke MAPF directly.
+
+The initial request means all of the next `min(K, remaining_actions)` actions;
+a route ending before `K` is a complete request, while a conflict-shortened
+prefix is not. Multiple actions from one plan version may own the same resource
+(for example move-then-wait), but another plan version may not.
+
+Admission is batch-oriented. Initial and replenishment requests are collected
+against one occupied/committed snapshot; request-vs-request contention is
+arbitrated explicitly by `robot_id`, independent of input collection order,
+and accepted decisions are committed only after evaluation. Tick completion
+first validates that each released action is both `completed` and currently
+committed. A later batch then attempts the earliest missing frontier action.
+Failed replenishment preserves the remaining committed suffix and retries the
+same frontier rather than skipping it. Plan replacement may release only
+planned actions and can never release a running edge or target claim.
 
 The initial generic stopping-distance model is:
 
@@ -238,6 +279,15 @@ The static scenario renderer is a design tool, not part of the execution
 kernel. It uses the same map and validated review-frame contract so early
 bitmaps can later be regenerated from trace-derived state without moving traffic
 logic into visualization.
+
+`WorldState` is the one mutable authority for the current tick, robots, tasks,
+current plans, and committed reservation ledger. It validates unique occupancy,
+bidirectional task assignments, payload consistency, current plan versions, and
+reservation ownership. History will be reconstructed from the append-only
+trace; the simulator does not deep-copy a world snapshot on every tick.
+An idle robot cannot retain a current plan, active action, payload, or committed
+reservation. These aggregate rules are validated before assignment so a failed
+dispatch choice cannot leave a one-sided task/robot mutation.
 
 ## Core invariants
 
