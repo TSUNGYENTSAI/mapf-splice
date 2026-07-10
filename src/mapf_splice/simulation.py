@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from mapf_splice.deadlock import (
     CandidateIdentity,
-    ContainmentState,
+    ConfirmationOutcome,
     DeadlockController,
     DeadlockUpdate,
 )
@@ -434,14 +434,13 @@ class DeterministicSimulator:
         )
 
     def tick(self) -> None:
-        self.deadlock_controller.prune_resolved()
         self._record("tick-start")
         due = self._complete_due_actions()
         self._record("after-completions")
         self._release_completed(due)
         self._record("after-release")
         self._advance_tasks()
-        self._emit_invalidations(self.deadlock_controller.refresh(self.world))
+        self._emit_invalidation(self.deadlock_controller.refresh(self.world))
         self._record("after-task-advance")
         self._admit()
         self._record("after-admission")
@@ -463,48 +462,42 @@ class DeterministicSimulator:
         )
         self.world.tick += 1
 
-    def _emit_invalidations(
-        self, invalidated: tuple[tuple[CandidateIdentity, int], ...]
-    ) -> None:
-        for identity, epoch in invalidated:
-            self.trace.append(
-                tick=self.world.tick,
-                phase=TickPhase.ADVANCE_TASKS,
-                kind=EventKind.CONTAINMENT_INVALIDATED,
-                details=(
-                    ("members", self._identity_label(identity)),
-                    ("epoch", epoch),
-                ),
-            )
+    def _emit_invalidation(self, invalidated: CandidateIdentity | None) -> None:
+        if invalidated is None:
+            return
+        self.trace.append(
+            tick=self.world.tick,
+            phase=TickPhase.ADVANCE_TASKS,
+            kind=EventKind.CONTAINMENT_INVALIDATED,
+            details=(("members", self._identity_label(invalidated)),),
+        )
+
+    _OUTCOME_EVENTS = {
+        ConfirmationOutcome.CONFIRMED_DEADLOCK: EventKind.HARD_DEADLOCK_CONFIRMED,
+        ConfirmationOutcome.UNSUPPORTED_EXTERNAL: EventKind.CONFIRMATION_UNSUPPORTED,
+        ConfirmationOutcome.CLEAR: EventKind.CONTAINMENT_CLEARED,
+    }
 
     def _confirm(self) -> None:
-        transition_events = {
-            ContainmentState.CONFIRMED_DEADLOCK: EventKind.HARD_DEADLOCK_CONFIRMED,
-            ContainmentState.EXTERNAL_BLOCKED: EventKind.CONTAINMENT_EXTERNAL_BLOCKED,
-            ContainmentState.CLEARED: EventKind.CONTAINMENT_CLEARED,
-        }
-        for result in self.deadlock_controller.confirm(self.world, self.world.tick):
-            self.trace.append(
-                tick=self.world.tick,
-                phase=TickPhase.CONFIRM_DEADLOCK,
-                kind=EventKind.CONFIRMED_WAIT_FOR_BUILT,
-                details=(
-                    ("members", self._identity_label(result.identity)),
-                    ("epoch", result.epoch),
-                    ("outcome", result.outcome.value),
-                    ("edges", len(result.graph.edges)),
-                ),
-            )
-            if result.state is not result.previous_state:
-                self.trace.append(
-                    tick=self.world.tick,
-                    phase=TickPhase.CONFIRM_DEADLOCK,
-                    kind=transition_events[result.state],
-                    details=(
-                        ("members", self._identity_label(result.identity)),
-                        ("epoch", result.epoch),
-                    ),
-                )
+        result = self.deadlock_controller.confirm(self.world, self.world.tick)
+        if result is None:
+            return
+        self.trace.append(
+            tick=self.world.tick,
+            phase=TickPhase.CONFIRM_DEADLOCK,
+            kind=EventKind.CONFIRMED_WAIT_FOR_BUILT,
+            details=(
+                ("members", self._identity_label(result.identity)),
+                ("outcome", result.outcome.value),
+                ("edges", len(result.graph.edges)),
+            ),
+        )
+        self.trace.append(
+            tick=self.world.tick,
+            phase=TickPhase.CONFIRM_DEADLOCK,
+            kind=self._OUTCOME_EVENTS[result.outcome],
+            details=(("members", self._identity_label(result.identity)),),
+        )
 
     def _record(
         self,

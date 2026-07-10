@@ -21,39 +21,26 @@ class ContainmentState(StrEnum):
     DRAINING = "draining"
     QUIESCENT = "quiescent"
     CONFIRMED_DEADLOCK = "confirmed-deadlock"
-    EXTERNAL_BLOCKED = "external-blocked"
-    CLEARED = "cleared"
-    INVALIDATED = "invalidated"
+    UNSUPPORTED = "unsupported"
 
 
 class ConfirmationOutcome(StrEnum):
     CONFIRMED_DEADLOCK = "confirmed-deadlock"
-    EXTERNAL_DEPENDENCY = "external-dependency"
+    UNSUPPORTED_EXTERNAL = "unsupported-external"
     CLEAR = "clear"
 
 
-ACTIVE_STATES = frozenset(
-    {
-        ContainmentState.DRAINING,
-        ContainmentState.QUIESCENT,
-        ContainmentState.CONFIRMED_DEADLOCK,
-        ContainmentState.EXTERNAL_BLOCKED,
-    }
-)
-
-_OUTCOME_STATE = {
-    ConfirmationOutcome.CONFIRMED_DEADLOCK: ContainmentState.CONFIRMED_DEADLOCK,
-    ConfirmationOutcome.EXTERNAL_DEPENDENCY: ContainmentState.EXTERNAL_BLOCKED,
-    ConfirmationOutcome.CLEAR: ContainmentState.CLEARED,
-}
-
-
 def classify_confirmation(graph: ConfirmedWaitForGraph) -> ConfirmationOutcome:
-    """Interpret a facts-only confirmed graph into a control outcome (policy)."""
+    """Interpret a facts-only confirmed graph into a control outcome (policy).
+
+    An internal cycle is a hard reservation deadlock. Otherwise, a blocker
+    outside the containment scope is out of v0.1 scope (unsupported); a fully
+    in-scope acyclic graph means a scoped robot can still make progress (clear).
+    """
     if graph.cyclic_sccs:
         return ConfirmationOutcome.CONFIRMED_DEADLOCK
     if any(not edge.blocking_in_scope for edge in graph.edges):
-        return ConfirmationOutcome.EXTERNAL_DEPENDENCY
+        return ConfirmationOutcome.UNSUPPORTED_EXTERNAL
     return ConfirmationOutcome.CLEAR
 
 
@@ -62,13 +49,11 @@ class SccObservation:
     identity: CandidateIdentity
     count: int
     evidence: tuple[ProspectiveDependency, ...]
-    suppressed: bool = False
 
 
 @dataclass(slots=True)
 class Containment:
     identity: CandidateIdentity
-    epoch: int
     state: ContainmentState = ContainmentState.DRAINING
     confirmation_tick: int | None = None
     outcome: ConfirmationOutcome | None = None
@@ -85,11 +70,8 @@ class DeadlockUpdate:
 @dataclass(frozen=True, slots=True)
 class ConfirmationResult:
     identity: CandidateIdentity
-    epoch: int
     graph: ConfirmedWaitForGraph
     outcome: ConfirmationOutcome
-    previous_state: ContainmentState
-    state: ContainmentState
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +84,6 @@ class DeadlockCandidateSnapshot:
 @dataclass(frozen=True, slots=True)
 class ContainmentSnapshot:
     identity: CandidateIdentity
-    epoch: int
     state: ContainmentState
     confirmation_tick: int | None
     outcome: ConfirmationOutcome | None
@@ -113,7 +94,7 @@ class ContainmentSnapshot:
 class DeadlockControllerSnapshot:
     threshold: int
     candidates: tuple[DeadlockCandidateSnapshot, ...]
-    containments: tuple[ContainmentSnapshot, ...]
+    containment: ContainmentSnapshot | None
 
 
 def cyclic_sccs(analysis: PreviewAnalysis) -> tuple[tuple[str, ...], ...]:
@@ -125,62 +106,63 @@ def cyclic_sccs(analysis: PreviewAnalysis) -> tuple[tuple[str, ...], ...]:
 
 @dataclass(slots=True)
 class DeadlockController:
+    """Single-incident reference controller.
+
+    v0.1 supports at most one active containment incident globally. While an
+    incident is active, no second incident forms and no candidate accrues an
+    eligible stability count. Recovery-group expansion and multi-incident
+    orchestration are deliberately out of scope.
+    """
+
     stable_scc_observation_threshold: int = 2
     _counts: dict[CandidateIdentity, int] = field(default_factory=dict, init=False)
-    _containments: dict[CandidateIdentity, Containment] = field(
-        default_factory=dict,
-        init=False,
-    )
-    _epoch_counter: int = field(default=0, init=False)
+    _active: Containment | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
         if self.stable_scc_observation_threshold < 1:
             raise ValueError("stable SCC observation threshold must be positive")
 
     @property
-    def containments(self) -> tuple[Containment, ...]:
-        return tuple(self._containments[key] for key in sorted(self._containments))
+    def containment(self) -> Containment | None:
+        return self._active
 
     def snapshot(self) -> DeadlockControllerSnapshot:
         """Serialize current state read-only; callers refresh() beforehand."""
+        active = self._active
         return DeadlockControllerSnapshot(
             threshold=self.stable_scc_observation_threshold,
             candidates=tuple(
                 DeadlockCandidateSnapshot(
                     identity=identity,
                     observation_count=count,
-                    stable=identity in self._containments,
+                    stable=active is not None and identity == active.identity,
                 )
                 for identity, count in sorted(self._counts.items())
             ),
-            containments=tuple(
-                ContainmentSnapshot(
-                    identity=containment.identity,
-                    epoch=containment.epoch,
-                    state=containment.state,
-                    confirmation_tick=containment.confirmation_tick,
-                    outcome=containment.outcome,
-                    confirmed_graph=containment.confirmed_graph,
+            containment=(
+                None
+                if active is None
+                else ContainmentSnapshot(
+                    identity=active.identity,
+                    state=active.state,
+                    confirmation_tick=active.confirmation_tick,
+                    outcome=active.outcome,
+                    confirmed_graph=active.confirmed_graph,
                 )
-                for _, containment in sorted(self._containments.items())
             ),
         )
-
-    def _active_members(
-        self, exclude: CandidateIdentity | None = None
-    ) -> set[PlanMember]:
-        return {
-            member
-            for identity, containment in self._containments.items()
-            if containment.state in ACTIVE_STATES and identity != exclude
-            for member in identity
-        }
 
     def observe(
         self,
         analysis: PreviewAnalysis,
         plan_versions: Mapping[str, int],
     ) -> DeadlockUpdate:
+        # While an incident is active, candidate accumulation is frozen: no new
+        # incident forms and no count changes. Prospective evidence still lives
+        # in the preview graph itself.
+        if self._active is not None:
+            return DeadlockUpdate((), (), ())
+
         current: dict[CandidateIdentity, tuple[ProspectiveDependency, ...]] = {}
         for members in cyclic_sccs(analysis):
             identity = tuple(
@@ -201,74 +183,50 @@ class DeadlockController:
         stable: list[CandidateIdentity] = []
         observations: list[SccObservation] = []
         for identity in sorted(current):
-            if set(identity) & self._active_members(exclude=identity):
-                # Suppressed by an overlapping active containment: no eligible
-                # stability count accrues until the overlap disappears.
-                self._counts.pop(identity, None)
-                observations.append(
-                    SccObservation(identity, 0, current[identity], suppressed=True)
-                )
-                continue
             count = self._counts.get(identity, 0) + 1
             self._counts[identity] = count
             observations.append(SccObservation(identity, count, current[identity]))
             if (
-                count >= self.stable_scc_observation_threshold
-                and identity not in self._containments
+                self._active is None
+                and count >= self.stable_scc_observation_threshold
             ):
-                self._epoch_counter += 1
-                self._containments[identity] = Containment(
-                    identity, self._epoch_counter
-                )
+                self._active = Containment(identity)
                 stable.append(identity)
-        return DeadlockUpdate(
-            tuple(observations),
-            tuple(stable),
-            expired,
-        )
+        return DeadlockUpdate(tuple(observations), tuple(stable), expired)
 
-    def refresh(
-        self, world: WorldState
-    ) -> tuple[tuple[CandidateIdentity, int], ...]:
-        """Invalidate active containments whose robots or plan versions changed.
+    def refresh(self, world: WorldState) -> CandidateIdentity | None:
+        """Drop the active incident if its scoped robots or plan versions changed.
 
-        Mutates containment state, so the control phase must call this
-        explicitly; read-only observers (snapshot) never trigger it. Returns the
-        newly invalidated (identity, epoch) pairs for event emission.
+        Mutates controller state, so the control phase must call this explicitly;
+        read-only observers (snapshot) never trigger it. Returns the invalidated
+        identity for event emission, or None.
         """
-        invalidated: list[tuple[CandidateIdentity, int]] = []
-        for identity in sorted(self._containments):
-            containment = self._containments[identity]
-            if containment.state not in ACTIVE_STATES:
-                continue
-            if any(
-                robot_id not in world.robots
-                or world.robots[robot_id].plan_version != version
-                or robot_id not in world.plans
-                or world.plans[robot_id].version != version
-                for robot_id, version in containment.identity
-            ):
-                containment.state = ContainmentState.INVALIDATED
-                invalidated.append((identity, containment.epoch))
-        return tuple(invalidated)
+        active = self._active
+        if active is None:
+            return None
+        if any(
+            robot_id not in world.robots
+            or world.robots[robot_id].plan_version != version
+            or robot_id not in world.plans
+            or world.plans[robot_id].version != version
+            for robot_id, version in active.identity
+        ):
+            self._release()
+            return active.identity
+        return None
 
     def is_contained(self, plan: Plan) -> bool:
-        member = (plan.robot_id, plan.version)
-        return any(
-            containment.state in ACTIVE_STATES and member in containment.identity
-            for containment in self._containments.values()
-        )
+        active = self._active
+        return active is not None and (plan.robot_id, plan.version) in active.identity
 
     def newly_quiescent(self, world: WorldState) -> tuple[CandidateIdentity, ...]:
-        results: list[CandidateIdentity] = []
-        for identity in sorted(self._containments):
-            containment = self._containments[identity]
-            if containment.state is not ContainmentState.DRAINING:
-                continue
-            if self._is_quiescent(world, identity):
-                containment.state = ContainmentState.QUIESCENT
-                results.append(identity)
-        return tuple(results)
+        active = self._active
+        if active is None or active.state is not ContainmentState.DRAINING:
+            return ()
+        if self._is_quiescent(world, active.identity):
+            active.state = ContainmentState.QUIESCENT
+            return (active.identity,)
+        return ()
 
     @staticmethod
     def _is_quiescent(world: WorldState, identity: CandidateIdentity) -> bool:
@@ -287,45 +245,30 @@ class DeadlockController:
                 return False
         return True
 
-    def confirm(
-        self, world: WorldState, tick: int
-    ) -> tuple[ConfirmationResult, ...]:
-        """Confirm QUIESCENT containments and re-evaluate EXTERNAL_BLOCKED ones."""
-        results: list[ConfirmationResult] = []
-        for identity in sorted(self._containments):
-            containment = self._containments[identity]
-            if containment.state not in (
-                ContainmentState.QUIESCENT,
-                ContainmentState.EXTERNAL_BLOCKED,
-            ):
-                continue
-            graph = build_confirmed_wait_for(
-                world, containment.identity, epoch=containment.epoch, tick=tick
-            )
-            outcome = classify_confirmation(graph)
-            previous = containment.state
-            containment.state = _OUTCOME_STATE[outcome]
-            containment.outcome = outcome
-            containment.confirmation_tick = tick
-            containment.confirmed_graph = graph
-            results.append(
-                ConfirmationResult(
-                    identity,
-                    containment.epoch,
-                    graph,
-                    outcome,
-                    previous,
-                    containment.state,
-                )
-            )
-        return tuple(results)
+    def confirm(self, world: WorldState, tick: int) -> ConfirmationResult | None:
+        """Confirm a quiescent incident exactly once.
 
-    def prune_resolved(self) -> None:
-        """Drop CLEARED/INVALIDATED containments and reset their stability counts."""
-        for identity in list(self._containments):
-            if self._containments[identity].state in (
-                ContainmentState.CLEARED,
-                ContainmentState.INVALIDATED,
-            ):
-                del self._containments[identity]
-                self._counts.pop(identity, None)
+        An internal cycle holds the incident as a confirmed deadlock; an
+        external blocker holds it as unsupported; an acyclic in-scope graph
+        clears and releases it. No automatic re-evaluation.
+        """
+        active = self._active
+        if active is None or active.state is not ContainmentState.QUIESCENT:
+            return None
+        graph = build_confirmed_wait_for(world, active.identity, tick=tick)
+        outcome = classify_confirmation(graph)
+        active.confirmation_tick = tick
+        active.outcome = outcome
+        active.confirmed_graph = graph
+        result = ConfirmationResult(active.identity, graph, outcome)
+        if outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK:
+            active.state = ContainmentState.CONFIRMED_DEADLOCK
+        elif outcome is ConfirmationOutcome.UNSUPPORTED_EXTERNAL:
+            active.state = ContainmentState.UNSUPPORTED
+        else:  # CLEAR: false positive, release and resume admission next tick.
+            self._release()
+        return result
+
+    def _release(self) -> None:
+        self._active = None
+        self._counts.clear()

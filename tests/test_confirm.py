@@ -75,9 +75,9 @@ def test_confirmed_graph_records_mutual_occupancy_cycle() -> None:
         admit=False,
     )
     scope = (("R1", 1), ("R2", 1))
-    graph = build_confirmed_wait_for(world, scope, epoch=1, tick=7)
+    graph = build_confirmed_wait_for(world, scope, tick=7)
 
-    assert graph.epoch == 1 and graph.captured_at_tick == 7
+    assert graph.captured_at_tick == 7
     pairs = {(e.waiting_robot_id, e.blocking_robot_id) for e in graph.edges}
     assert pairs == {("R1", "R2"), ("R2", "R1")}
     assert graph.cyclic_sccs == (("R1", "R2"),)
@@ -97,7 +97,7 @@ def test_confirmed_graph_clears_when_next_cells_are_free() -> None:
         {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(2, 0), Cell(2, 1))},
         admit=False,
     )
-    graph = build_confirmed_wait_for(world, (("R1", 1), ("R2", 1)), epoch=1, tick=3)
+    graph = build_confirmed_wait_for(world, (("R1", 1), ("R2", 1)), tick=3)
     assert graph.edges == ()
     assert graph.cyclic_sccs == ()
 
@@ -107,7 +107,7 @@ def test_confirmed_graph_marks_out_of_scope_blocker() -> None:
         {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(0, 1), Cell(0, 2))},
         admit=False,
     )
-    graph = build_confirmed_wait_for(world, (("R1", 1),), epoch=1, tick=4)
+    graph = build_confirmed_wait_for(world, (("R1", 1),), tick=4)
     edge = next(e for e in graph.edges if e.blocking_robot_id == "R2")
     assert edge.blocking_in_scope is False
     assert graph.cyclic_sccs == ()
@@ -121,7 +121,7 @@ def test_confirmed_graph_records_committed_blocker_refs() -> None:
     world.reservations.acquire_initial_batch(
         (world.plans["R2"],), occupied=world.occupied_cells()
     )
-    graph = build_confirmed_wait_for(world, (("R1", 1),), epoch=2, tick=9)
+    graph = build_confirmed_wait_for(world, (("R1", 1),), tick=9)
     edge = next(
         e
         for e in graph.edges
@@ -134,7 +134,7 @@ def test_confirmed_graph_records_committed_blocker_refs() -> None:
 
 def test_confirmed_graph_excludes_self_ownership() -> None:
     world = _world({"R1": (Cell(0, 0), Cell(0, 0))}, admit=False)
-    graph = build_confirmed_wait_for(world, (("R1", 1),), epoch=1, tick=1)
+    graph = build_confirmed_wait_for(world, (("R1", 1),), tick=1)
     assert graph.edges == ()
 
 
@@ -142,14 +142,14 @@ def test_confirmed_builder_rejects_non_planned_next_action() -> None:
     world = _world({"R1": (Cell(0, 0), Cell(0, 1))}, admit=True)
     world.plans["R1"].actions[0].transition_to(ActionStatus.RUNNING)
     with pytest.raises(ConfirmationError, match="planned"):
-        build_confirmed_wait_for(world, (("R1", 1),), epoch=1, tick=1)
+        build_confirmed_wait_for(world, (("R1", 1),), tick=1)
 
 
 def test_confirmed_graph_allows_zero_version_idle_occupancy_blocker() -> None:
     world = _world({"R1": (Cell(0, 0), Cell(0, 1))}, admit=False)
     world.robots["R2"] = Robot("R2", Cell(0, 1))
     world.validate()
-    graph = build_confirmed_wait_for(world, (("R1", 1),), epoch=1, tick=1)
+    graph = build_confirmed_wait_for(world, (("R1", 1),), tick=1)
     edge = next(e for e in graph.edges if e.blocking_robot_id == "R2")
     assert edge.blocking_plan_version == 0
     assert edge.occupied_blocker is True

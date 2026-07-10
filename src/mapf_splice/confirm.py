@@ -29,7 +29,6 @@ class ConfirmedWaitForEdge:
 @dataclass(frozen=True, slots=True)
 class ConfirmedWaitForGraph:
     scope: tuple[tuple[str, int], ...]
-    epoch: int
     captured_at_tick: int
     edges: tuple[ConfirmedWaitForEdge, ...]
     cyclic_sccs: tuple[tuple[str, ...], ...]
@@ -39,7 +38,6 @@ def build_confirmed_wait_for(
     world: WorldState,
     scope: tuple[tuple[str, int], ...],
     *,
-    epoch: int,
     tick: int,
 ) -> ConfirmedWaitForGraph:
     """Build the authoritative wait-for graph for a quiescent containment scope."""
@@ -106,7 +104,6 @@ def build_confirmed_wait_for(
     )
     return ConfirmedWaitForGraph(
         scope=scope,
-        epoch=epoch,
         captured_at_tick=tick,
         edges=edges,
         cyclic_sccs=cyclic,

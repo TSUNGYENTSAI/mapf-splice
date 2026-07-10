@@ -69,7 +69,7 @@ def test_runtime_evidence_and_containment_are_recorded_at_source() -> None:
     )
     assert stable["preview"]["dependencies"]
     assert stable["deadlock"]["candidates"][0]["observation_count"] >= 2
-    assert stable["deadlock"]["containments"][0]["state"] == "draining"
+    assert stable["deadlock"]["containment"]["state"] == "draining"
     assert all(
         set(item) >= {"waiting_robot_id", "blocking_robot_id", "resource"}
         for item in stable["preview"]["dependencies"]
@@ -96,7 +96,8 @@ def test_after_confirmation_checkpoint_present_and_schema_v2() -> None:
         CHECKPOINTS
     )
     for frame in artifact["frames"]:
-        assert isinstance(frame["confirmed_wait_for"], list)
+        graph = frame["confirmed_wait_for"]
+        assert graph is None or isinstance(graph, dict)
     validate_replay(artifact)
 
 

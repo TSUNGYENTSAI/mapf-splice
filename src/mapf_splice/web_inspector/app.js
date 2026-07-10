@@ -12,7 +12,7 @@ const resourceLabel = r => r.type === 'vertex' ? `V(${cellLabel(r.cell)})` : `E(
 
 const allEvents = frames.flatMap((frame, frameIndex) => frame.events.map(event => ({...event, frameIndex})));
 const bookmarkDefs = [
-  ['Dependency','prospective-dependency'],['Cyclic SCC','prospective-scc-observed'],['Stable SCC','stable-scc-detected'],['Containment','containment-started'],['Quiescence','quiescence-reached'],['Confirmed','confirmed-wait-for-built'],['Hard deadlock','hard-deadlock-confirmed'],['Cleared','containment-cleared']
+  ['Dependency','prospective-dependency'],['Cyclic SCC','prospective-scc-observed'],['Stable SCC','stable-scc-detected'],['Containment','containment-started'],['Quiescence','quiescence-reached'],['Confirmed','confirmed-wait-for-built'],['Hard deadlock','hard-deadlock-confirmed'],['Cleared','containment-cleared'],['Unsupported','confirmation-unsupported']
 ];
 const bookmarks = bookmarkDefs.map(([label,kind]) => ({label,kind,event:allEvents.find(e=>e.kind===kind)})).filter(x=>x.event);
 $('bookmarks').innerHTML = bookmarks.map((b,i)=>`<button data-bookmark="${i}">${b.label} · T${b.event.tick}</button>`).join('');
@@ -68,14 +68,14 @@ function renderGraph(frame){
   robots.forEach(id=>{const [x,y]=positions[id];svg+=`<circle cx="${x}" cy="${y}" r="18" fill="#141c21" stroke="${robotColor(id)}" stroke-width="2"/><text x="${x}" y="${y+4}" text-anchor="middle" fill="${robotColor(id)}" font-size="10" font-family="monospace">${esc(id)}</text>`;});
   $('graph').innerHTML=`<svg viewBox="0 0 320 152">${svg}</svg>`;
   $('edgeCount').textContent=`${frame.preview.dependencies.length} edges`;
-  const containmentById=new Map(frame.deadlock.containments.map(c=>[c.identity.map(x=>x.robot_id+'@'+x.plan_version).join(','),c]));
-  const quiescentStates=['quiescent','confirmed-deadlock','external-blocked','cleared'];
-  $('sccs').innerHTML=frame.deadlock.candidates.map(c=>{const id=c.identity.map(x=>x.robot_id+'@'+x.plan_version).join(','),containment=containmentById.get(id),state=containment?.state;return `<div class="scc ${c.stable?'stable':''} ${quiescentStates.includes(state)?'quiescent':''}"><strong>${esc(id)}</strong>observation ${c.observation_count} / ${frame.deadlock.threshold}<br>${c.stable?'stable · ':''}${state?'state '+esc(state):''}${containment?.epoch?' · epoch '+containment.epoch:''}</div>`}).join('')||'<div class="scc"><strong>No cyclic SCC</strong>Current preview evidence is acyclic.</div>';
+  const containment=frame.deadlock.containment;
+  const containmentId=containment?containment.identity.map(x=>x.robot_id+'@'+x.plan_version).join(','):null;
+  const quiescentStates=['quiescent','confirmed-deadlock','unsupported'];
+  $('sccs').innerHTML=frame.deadlock.candidates.map(c=>{const id=c.identity.map(x=>x.robot_id+'@'+x.plan_version).join(',');const state=id===containmentId?containment.state:null;return `<div class="scc ${c.stable?'stable':''} ${state&&quiescentStates.includes(state)?'quiescent':''}"><strong>${esc(id)}</strong>observation ${c.observation_count} / ${frame.deadlock.threshold}<br>${c.stable?'stable · ':''}${state?'state '+esc(state):''}</div>`}).join('')||'<div class="scc"><strong>No cyclic SCC</strong>Current preview evidence is acyclic.</div>';
 }
 function renderConfirmed(frame){
-  const graphs=frame.confirmed_wait_for||[];
-  if(!graphs.length){$('confirmedMeta').textContent='—';$('confirmedGraph').innerHTML='<div class="scc"><strong>No confirmed graph</strong>Nothing confirmed on this frame.</div>';return;}
-  const g=graphs[0];
+  const g=frame.confirmed_wait_for;
+  if(!g){$('confirmedMeta').textContent='—';$('confirmedGraph').innerHTML='<div class="scc"><strong>No confirmed graph</strong>Nothing confirmed on this frame.</div>';return;}
   $('confirmedMeta').textContent=`tick ${g.captured_at_tick} · ${g.outcome}`;
   const robots=[...new Set(g.edges.flatMap(e=>[e.waiting_robot_id,e.blocking_robot_id]))].sort();
   const n=Math.max(robots.length,1),cx=160,cy=76,rad=55,positions={};robots.forEach((id,i)=>{const a=-Math.PI/2+i*2*Math.PI/n;positions[id]=[cx+Math.cos(a)*rad,cy+Math.sin(a)*rad];});

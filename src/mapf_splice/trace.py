@@ -41,7 +41,7 @@ class EventKind(StrEnum):
     QUIESCENCE_REACHED = "quiescence-reached"
     CONFIRMED_WAIT_FOR_BUILT = "confirmed-wait-for-built"
     HARD_DEADLOCK_CONFIRMED = "hard-deadlock-confirmed"
-    CONTAINMENT_EXTERNAL_BLOCKED = "containment-external-blocked"
+    CONFIRMATION_UNSUPPORTED = "confirmation-unsupported"
     CONTAINMENT_CLEARED = "containment-cleared"
     CONTAINMENT_INVALIDATED = "containment-invalidated"
     TICK_ADVANCED = "tick-advanced"

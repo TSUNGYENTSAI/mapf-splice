@@ -11,7 +11,6 @@ from typing import Any
 import jsonschema
 
 from mapf_splice.deadlock import (
-    ACTIVE_STATES,
     DeadlockController,
     DeadlockUpdate,
     cyclic_sccs,
@@ -98,7 +97,6 @@ def _confirmed_graph(containment) -> dict[str, Any]:
     graph = containment.confirmed_graph
     return {
         "scope": _identity(graph.scope),
-        "epoch": graph.epoch,
         "captured_at_tick": graph.captured_at_tick,
         "outcome": containment.outcome.value if containment.outcome else None,
         "state": containment.state.value,
@@ -136,16 +134,13 @@ class FrameRecorder:
             for action in preview_actions(world, plan)
         }
         committed_refs = set(world.reservations.all_committed_actions())
-        contained_members = {
-            member: index
-            for index, containment in enumerate(controller_state.containments)
-            if containment.state in ACTIVE_STATES
-            for member in containment.identity
-        }
+        containment = controller_state.containment
+        contained_members = (
+            set(containment.identity) if containment is not None else set()
+        )
         robots = []
         for robot_id, robot in sorted(world.robots.items()):
             task = world.tasks.get(robot.active_task_id or "")
-            containment_index = contained_members.get((robot_id, robot.plan_version))
             robots.append(
                 {
                     "robot_id": robot_id,
@@ -156,8 +151,7 @@ class FrameRecorder:
                     "plan_version": robot.plan_version,
                     "active_action_ref": _ref(robot.active_action_ref),
                     "remaining_ticks": robot.remaining_ticks,
-                    "contained": containment_index is not None,
-                    "containment_index": containment_index,
+                    "contained": (robot_id, robot.plan_version) in contained_members,
                 }
             )
         plans = []
@@ -272,26 +266,31 @@ class FrameRecorder:
                         }
                         for item in controller_state.candidates
                     ],
-                    "containments": [
-                        {
-                            "identity": _identity(item.identity),
-                            "epoch": item.epoch,
-                            "state": item.state.value,
-                            "confirmation_tick": item.confirmation_tick,
-                            "outcome": item.outcome.value if item.outcome else None,
+                    "containment": (
+                        None
+                        if containment is None
+                        else {
+                            "identity": _identity(containment.identity),
+                            "state": containment.state.value,
+                            "confirmation_tick": containment.confirmation_tick,
+                            "outcome": (
+                                containment.outcome.value
+                                if containment.outcome
+                                else None
+                            ),
                         }
-                        for item in controller_state.containments
-                    ],
+                    ),
                     "newly_stable": [
                         _identity(value)
                         for value in (deadlock_update.stable if deadlock_update else ())
                     ],
                 },
-                "confirmed_wait_for": [
+                "confirmed_wait_for": (
                     _confirmed_graph(containment)
-                    for containment in controller_state.containments
-                    if containment.confirmed_graph is not None
-                ],
+                    if containment is not None
+                    and containment.confirmed_graph is not None
+                    else None
+                ),
                 "events": [_event(value) for value in events],
             }
         )

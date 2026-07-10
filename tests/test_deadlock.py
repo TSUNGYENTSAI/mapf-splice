@@ -68,7 +68,7 @@ def test_stability_requires_consecutive_observations() -> None:
     assert second.observations[0].count == 2
     assert second.stable == ((("R1", 1), ("R2", 1)),)
     assert controller.observe(cycle, versions).stable == ()
-    assert len(controller.containments) == 1
+    assert controller.containment is not None
     immediate = DeadlockController(1).observe(cycle, versions)
     assert immediate.stable == ((("R1", 1), ("R2", 1)),)
 
@@ -172,29 +172,28 @@ def _stale_containment_world() -> tuple[WorldState, DeadlockController, Plan]:
     return world, controller, replacement
 
 
-def test_new_plan_version_is_not_captured_by_stale_containment() -> None:
+def test_new_plan_version_safely_drops_the_incident() -> None:
     world, controller, replacement = _stale_containment_world()
 
-    controller.refresh(world)
+    invalidated = controller.refresh(world)
 
+    assert invalidated == (("R1", 1), ("R2", 1))
     assert not controller.is_contained(replacement)
-    assert controller.containments[0].state is ContainmentState.INVALIDATED
+    assert controller.containment is None
 
 
 def test_snapshot_is_read_only_and_refresh_is_explicit() -> None:
     world, controller, _ = _stale_containment_world()
 
-    # snapshot() serializes existing state; it must not invalidate the now-stale
-    # containment as a side effect of being observed.
-    assert controller.snapshot().containments[0].state is ContainmentState.DRAINING
-    assert controller.containments[0].state is ContainmentState.DRAINING
+    # snapshot() serializes existing state; it must not drop the now-stale
+    # incident as a side effect of being observed.
+    assert controller.snapshot().containment.state is ContainmentState.DRAINING
+    assert controller.containment.state is ContainmentState.DRAINING
 
-    # Invalidation happens only when the control phase explicitly refreshes.
-    controller.refresh(world)
-    assert controller.containments[0].state is ContainmentState.INVALIDATED
-    assert (
-        controller.snapshot().containments[0].state is ContainmentState.INVALIDATED
-    )
+    # The drop happens only when the control phase explicitly refreshes.
+    assert controller.refresh(world) is not None
+    assert controller.containment is None
+    assert controller.snapshot().containment is None
 
 
 @pytest.mark.parametrize(
@@ -399,36 +398,28 @@ def test_confirm_marks_hard_deadlock_on_internal_cycle() -> None:
     controller, world, scope = _quiescent_scope(
         {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(0, 1), Cell(0, 0))}
     )
-    results = controller.confirm(world, tick=18)
-    assert len(results) == 1
-    assert results[0].outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK
-    assert controller.containments[0].state is ContainmentState.CONFIRMED_DEADLOCK
-    assert controller.containments[0].confirmation_tick == 18
+    result = controller.confirm(world, tick=18)
+    assert result.outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK
+    assert controller.containment.state is ContainmentState.CONFIRMED_DEADLOCK
+    assert controller.containment.confirmation_tick == 18
 
 
-def test_confirm_clears_when_graph_is_acyclic_and_local() -> None:
+def test_confirm_clears_and_releases_when_graph_is_acyclic_and_local() -> None:
     controller, world, scope = _quiescent_scope(
         {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(2, 0), Cell(2, 1))}
     )
-    results = controller.confirm(world, tick=12)
-    assert results[0].outcome is ConfirmationOutcome.CLEAR
-    assert controller.containments[0].state is ContainmentState.CLEARED
-
-
-def test_cleared_containment_is_pruned_and_counts_reset() -> None:
-    controller, world, scope = _quiescent_scope(
-        {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(2, 0), Cell(2, 1))}
-    )
-    controller.confirm(world, tick=12)
-    controller.prune_resolved()
-    assert controller.containments == ()
+    result = controller.confirm(world, tick=12)
+    assert result.outcome is ConfirmationOutcome.CLEAR
+    # A clear result releases the incident immediately (no persistent state).
+    assert controller.containment is None
+    # The released candidate must re-accumulate from observation 1.
     update = controller.observe(
         _analysis(("R1", "R2"), ("R2", "R1")), {"R1": 1, "R2": 1}
     )
     assert update.observations[0].count == 1
 
 
-def test_external_blocked_holds_then_reevaluates_to_clear() -> None:
+def test_external_blocker_is_unsupported_with_evidence() -> None:
     # A 2-robot scope (so a cyclic SCC can form the containment), but the
     # confirmed graph has no internal cycle -- only R1 blocked by external R3.
     controller, world, scope = _quiescent_scope(
@@ -436,38 +427,35 @@ def test_external_blocked_holds_then_reevaluates_to_clear() -> None:
     )
     world.robots["R3"] = Robot("R3", Cell(0, 1))  # external blocker on R1's target
     world.validate()
-    first = controller.confirm(world, tick=5)
-    assert first[0].outcome is ConfirmationOutcome.EXTERNAL_DEPENDENCY
-    assert controller.containments[0].state is ContainmentState.EXTERNAL_BLOCKED
-    # external robot leaves; re-evaluation clears
-    world.robots["R3"].position = Cell(9, 9)
-    world.validate()
-    second = controller.confirm(world, tick=6)
-    assert second[0].outcome is ConfirmationOutcome.CLEAR
-    assert controller.containments[0].state is ContainmentState.CLEARED
+    result = controller.confirm(world, tick=5)
+    assert result.outcome is ConfirmationOutcome.UNSUPPORTED_EXTERNAL
+    assert controller.containment.state is ContainmentState.UNSUPPORTED
+    edge = next(e for e in result.graph.edges if e.blocking_robot_id == "R3")
+    assert edge.blocking_in_scope is False
+    assert edge.occupied_blocker is True
+    # No automatic re-evaluation: the incident is held, not re-confirmed.
+    assert controller.confirm(world, tick=6) is None
+    assert controller.containment.state is ContainmentState.UNSUPPORTED
 
 
-def test_overlapping_scc_does_not_accumulate_while_suppressed() -> None:
-    controller = DeadlockController(2)
-    controller.observe(_analysis(("R1", "R2"), ("R2", "R1")), {"R1": 1, "R2": 1})
-    controller.observe(_analysis(("R1", "R2"), ("R2", "R1")), {"R1": 1, "R2": 1})
-    assert controller.containments[0].state is ContainmentState.DRAINING
-    superset = _analysis(("R1", "R2"), ("R2", "R3"), ("R3", "R1"))
-    versions = {"R1": 1, "R2": 1, "R3": 1}
-    controller.observe(superset, versions)
-    second = controller.observe(superset, versions)
-    superset_obs = next(
-        o
-        for o in second.observations
-        if o.identity == (("R1", 1), ("R2", 1), ("R3", 1))
+def test_active_incident_freezes_candidate_accumulation() -> None:
+    controller, world, scope = _quiescent_scope(
+        {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(0, 1), Cell(0, 0))}
     )
-    assert superset_obs.suppressed is True
-    assert superset_obs.count == 0
+    # While one incident is active, a fresh (superset) SCC neither accumulates
+    # nor creates a second incident.
+    update = controller.observe(
+        _analysis(("R1", "R2"), ("R2", "R3"), ("R3", "R1")),
+        {"R1": 1, "R2": 1, "R3": 1},
+    )
+    assert update.observations == ()
+    assert update.stable == ()
+    assert controller.containment.identity == (("R1", 1), ("R2", 1))
 
 
 def test_classify_confirmation_prefers_internal_cycle() -> None:
     graph = ConfirmedWaitForGraph(
-        scope=(("R1", 1), ("R2", 1)), epoch=1, captured_at_tick=0, edges=(),
+        scope=(("R1", 1), ("R2", 1)), captured_at_tick=0, edges=(),
         cyclic_sccs=(("R1", "R2"),),
     )
     assert classify_confirmation(graph) is ConfirmationOutcome.CONFIRMED_DEADLOCK
@@ -502,6 +490,6 @@ def test_hero_reaches_quiescence_then_confirms(horizon: int) -> None:
     ]
     assert [dict(event.details)["members"] for event in hard] == ["R1@2,R2@2,R3@2"]
     assert (
-        simulator.deadlock_controller.containments[0].state
+        simulator.deadlock_controller.containment.state
         is ContainmentState.CONFIRMED_DEADLOCK
     )
