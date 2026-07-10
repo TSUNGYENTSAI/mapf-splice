@@ -6,6 +6,7 @@ from mapf_splice.deadlock import DeadlockController, cyclic_sccs
 from mapf_splice.domain import (
     ActionRef,
     Cell,
+    Plan,
     Robot,
     Task,
     TaskStatus,
@@ -119,7 +120,7 @@ def test_contention_is_not_an_edge_and_evidence_is_preserved() -> None:
     assert len(update.observations[0].evidence) == 4
 
 
-def test_new_plan_version_is_not_captured_by_stale_containment() -> None:
+def _stale_containment_world() -> tuple[WorldState, DeadlockController, Plan]:
     robots = {
         robot_id: Robot(robot_id, Cell(row, 0), active_task_id=f"T{row}")
         for row, robot_id in enumerate(("R1", "R2"))
@@ -161,9 +162,30 @@ def test_new_plan_version_is_not_captured_by_stale_containment() -> None:
         task_id="T0",
     )
     world.install_plan(replacement)
+    return world, controller, replacement
 
-    assert not controller.is_contained(replacement, world)
+
+def test_new_plan_version_is_not_captured_by_stale_containment() -> None:
+    world, controller, replacement = _stale_containment_world()
+
+    controller.refresh(world)
+
+    assert not controller.is_contained(replacement)
     assert not controller.containments[0].valid
+
+
+def test_snapshot_is_read_only_and_refresh_is_explicit() -> None:
+    world, controller, _ = _stale_containment_world()
+
+    # snapshot() serializes existing state; it must not invalidate the now-stale
+    # containment as a side effect of being observed.
+    assert controller.snapshot().containments[0].valid is True
+    assert controller.containments[0].valid is True
+
+    # Invalidation happens only when the control phase explicitly refreshes.
+    controller.refresh(world)
+    assert controller.containments[0].valid is False
+    assert controller.snapshot().containments[0].valid is False
 
 
 @pytest.mark.parametrize(

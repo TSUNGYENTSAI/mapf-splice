@@ -4,7 +4,7 @@
   "title": "MAPF Splice deterministic simulation replay v0.1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "schema_version", "scenario_id", "committed_horizon", "stable_scc_observation_threshold", "simulation_config", "scenario_content_hash", "source_git_commit", "termination_reason", "final_tick", "checkpoint_names", "map_rows", "stations", "frames"],
+  "required": ["$schema", "schema_version", "scenario_id", "committed_horizon", "stable_scc_observation_threshold", "simulation_config", "scenario_content_hash", "map_content_hash", "source_git_commit", "termination_reason", "final_tick", "checkpoint_names", "map_rows", "stations", "frames"],
   "properties": {
     "$schema": {"const": "simulation-run.v0.1.schema.json"},
     "schema_version": {"const": "simulation-run.v0.1"},
@@ -13,6 +13,7 @@
     "stable_scc_observation_threshold": {"type": "integer", "minimum": 1},
     "simulation_config": {"type": "object"},
     "scenario_content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "map_content_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "source_git_commit": {"type": ["string", "null"]},
     "termination_reason": {"enum": ["quiescence", "tick"]},
     "final_tick": {"type": "integer", "minimum": 0},

@@ -264,7 +264,7 @@ class DeterministicSimulator:
         for _, plan in sorted(self.world.plans.items()):
             if all(action.status is ActionStatus.COMPLETED for action in plan.actions):
                 continue
-            if self.deadlock_controller.is_contained(plan, self.world):
+            if self.deadlock_controller.is_contained(plan):
                 if not self.world.reservations.plan_initialized(plan):
                     raise WorldStateError("contained plan was not initially admitted")
                 continue
@@ -441,6 +441,7 @@ class DeterministicSimulator:
         self._release_completed(due)
         self._record("after-release")
         self._advance_tasks()
+        self.deadlock_controller.refresh(self.world)
         self._record("after-task-advance")
         self._admit()
         self._record("after-admission")

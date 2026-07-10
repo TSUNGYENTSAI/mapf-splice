@@ -96,7 +96,7 @@ class FrameRecorder:
         if self._committed_horizon is None:
             self._committed_horizon = world.reservations.horizon
         analysis = preview_analysis or PreviewAnalysis((), ())
-        controller_state = controller.snapshot(world)
+        controller_state = controller.snapshot()
         preview_refs = {
             action.ref
             for plan in world.plans.values()
@@ -258,6 +258,8 @@ class FrameRecorder:
 
     def artifact(self, *, termination_reason: str, final_tick: int) -> dict[str, Any]:
         scenario_bytes = self.scenario.path.read_bytes()
+        map_path = self.scenario.path.parent / self.scenario.data["map"]["path"]
+        map_bytes = map_path.read_bytes()
         try:
             git_commit = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
@@ -279,6 +281,7 @@ class FrameRecorder:
             ],
             "simulation_config": self.scenario.data["execution"],
             "scenario_content_hash": hashlib.sha256(scenario_bytes).hexdigest(),
+            "map_content_hash": hashlib.sha256(map_bytes).hexdigest(),
             "source_git_commit": git_commit,
             "termination_reason": termination_reason,
             "final_tick": final_tick,

@@ -116,9 +116,8 @@ class DeadlockController:
     def containments(self) -> tuple[Containment, ...]:
         return tuple(self._containments[key] for key in sorted(self._containments))
 
-    def snapshot(self, world: WorldState) -> DeadlockControllerSnapshot:
-        """Expose controller state without leaking its mutable dictionaries."""
-        self._refresh_containments(world)
+    def snapshot(self) -> DeadlockControllerSnapshot:
+        """Serialize current state read-only; callers refresh() beforehand."""
         return DeadlockControllerSnapshot(
             threshold=self.stable_scc_observation_threshold,
             candidates=tuple(
@@ -178,7 +177,12 @@ class DeadlockController:
             expired,
         )
 
-    def _refresh_containments(self, world: WorldState) -> None:
+    def refresh(self, world: WorldState) -> None:
+        """Invalidate containments whose scoped robots or plan versions changed.
+
+        Mutates containment validity, so the control phase must call this
+        explicitly; read-only observers (snapshot) never trigger it.
+        """
         for containment in self._containments.values():
             if not containment.valid:
                 continue
@@ -191,8 +195,7 @@ class DeadlockController:
             ):
                 containment.valid = False
 
-    def is_contained(self, plan: Plan, world: WorldState) -> bool:
-        self._refresh_containments(world)
+    def is_contained(self, plan: Plan) -> bool:
         member = (plan.robot_id, plan.version)
         return any(
             containment.valid and member in containment.identity
@@ -200,7 +203,6 @@ class DeadlockController:
         )
 
     def newly_quiescent(self, world: WorldState) -> tuple[CandidateIdentity, ...]:
-        self._refresh_containments(world)
         results: list[CandidateIdentity] = []
         for identity, containment in sorted(self._containments.items()):
             if not containment.valid or containment.quiescence_emitted:

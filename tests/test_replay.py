@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,16 @@ def test_runtime_evidence_and_containment_are_recorded_at_source() -> None:
         for item in stable["preview"]["dependencies"]
     )
     assert isinstance(stable["preview"]["contentions"], list)
+
+
+def test_replay_records_map_content_hash_distinct_from_scenario() -> None:
+    _, artifact = _recorded(2)
+    expected = hashlib.sha256(
+        (ROOT / "scenarios/compact-three-robot/map.txt").read_bytes()
+    ).hexdigest()
+    assert artifact["map_content_hash"] == expected
+    assert artifact["map_content_hash"] != artifact["scenario_content_hash"]
+    validate_replay(artifact)
 
 
 def test_export_termination_and_max_tick_failure() -> None:
