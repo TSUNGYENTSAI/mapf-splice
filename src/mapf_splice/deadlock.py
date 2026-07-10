@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from mapf_splice.confirm import cyclic_components
 from mapf_splice.domain import ActionStatus, Plan
 from mapf_splice.preview import PreviewAnalysis, ProspectiveDependency
 from mapf_splice.world import WorldState
@@ -54,49 +55,10 @@ class DeadlockControllerSnapshot:
 
 
 def cyclic_sccs(analysis: PreviewAnalysis) -> tuple[tuple[str, ...], ...]:
-    graph: dict[str, set[str]] = {}
-    for dependency in analysis.dependencies:
-        graph.setdefault(dependency.waiting_robot_id, set()).add(
-            dependency.blocking_robot_id
-        )
-        graph.setdefault(dependency.blocking_robot_id, set())
-
-    index = 0
-    indexes: dict[str, int] = {}
-    lowlinks: dict[str, int] = {}
-    stack: list[str] = []
-    on_stack: set[str] = set()
-    components: list[tuple[str, ...]] = []
-
-    def connect(node: str) -> None:
-        nonlocal index
-        indexes[node] = index
-        lowlinks[node] = index
-        index += 1
-        stack.append(node)
-        on_stack.add(node)
-        for neighbor in sorted(graph[node]):
-            if neighbor not in indexes:
-                connect(neighbor)
-                lowlinks[node] = min(lowlinks[node], lowlinks[neighbor])
-            elif neighbor in on_stack:
-                lowlinks[node] = min(lowlinks[node], indexes[neighbor])
-        if lowlinks[node] == indexes[node]:
-            members: list[str] = []
-            while True:
-                member = stack.pop()
-                on_stack.remove(member)
-                members.append(member)
-                if member == node:
-                    break
-            component = tuple(sorted(members))
-            if len(component) >= 2:
-                components.append(component)
-
-    for node in sorted(graph):
-        if node not in indexes:
-            connect(node)
-    return tuple(sorted(components))
+    return cyclic_components(
+        (dependency.waiting_robot_id, dependency.blocking_robot_id)
+        for dependency in analysis.dependencies
+    )
 
 
 @dataclass(slots=True)
