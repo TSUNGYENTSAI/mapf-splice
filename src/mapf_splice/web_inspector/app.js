@@ -12,7 +12,7 @@ const resourceLabel = r => r.type === 'vertex' ? `V(${cellLabel(r.cell)})` : `E(
 
 const allEvents = frames.flatMap((frame, frameIndex) => frame.events.map(event => ({...event, frameIndex})));
 const bookmarkDefs = [
-  ['Dependency','prospective-dependency'],['Cyclic SCC','prospective-scc-observed'],['Stable SCC','stable-scc-detected'],['Containment','containment-started'],['Quiescence','quiescence-reached']
+  ['Dependency','prospective-dependency'],['Cyclic SCC','prospective-scc-observed'],['Stable SCC','stable-scc-detected'],['Containment','containment-started'],['Quiescence','quiescence-reached'],['Confirmed','confirmed-wait-for-built'],['Hard deadlock','hard-deadlock-confirmed'],['Cleared','containment-cleared']
 ];
 const bookmarks = bookmarkDefs.map(([label,kind]) => ({label,kind,event:allEvents.find(e=>e.kind===kind)})).filter(x=>x.event);
 $('bookmarks').innerHTML = bookmarks.map((b,i)=>`<button data-bookmark="${i}">${b.label} · T${b.event.tick}</button>`).join('');
@@ -69,11 +69,24 @@ function renderGraph(frame){
   $('graph').innerHTML=`<svg viewBox="0 0 320 152">${svg}</svg>`;
   $('edgeCount').textContent=`${frame.preview.dependencies.length} edges`;
   const containmentById=new Map(frame.deadlock.containments.map(c=>[c.identity.map(x=>x.robot_id+'@'+x.plan_version).join(','),c]));
-  $('sccs').innerHTML=frame.deadlock.candidates.map(c=>{const id=c.identity.map(x=>x.robot_id+'@'+x.plan_version).join(','),containment=containmentById.get(id);return `<div class="scc ${c.stable?'stable':''} ${containment?.quiescence_emitted?'quiescent':''}"><strong>${esc(id)}</strong>observation ${c.observation_count} / ${frame.deadlock.threshold}<br>${c.stable?'stable · ':''}${containment?.valid?'contained':''}${containment?.quiescence_emitted?' · quiescent':''}</div>`}).join('')||'<div class="scc"><strong>No cyclic SCC</strong>Current preview evidence is acyclic.</div>';
+  const quiescentStates=['quiescent','confirmed-deadlock','external-blocked','cleared'];
+  $('sccs').innerHTML=frame.deadlock.candidates.map(c=>{const id=c.identity.map(x=>x.robot_id+'@'+x.plan_version).join(','),containment=containmentById.get(id),state=containment?.state;return `<div class="scc ${c.stable?'stable':''} ${quiescentStates.includes(state)?'quiescent':''}"><strong>${esc(id)}</strong>observation ${c.observation_count} / ${frame.deadlock.threshold}<br>${c.stable?'stable · ':''}${state?'state '+esc(state):''}${containment?.epoch?' · epoch '+containment.epoch:''}</div>`}).join('')||'<div class="scc"><strong>No cyclic SCC</strong>Current preview evidence is acyclic.</div>';
+}
+function renderConfirmed(frame){
+  const graphs=frame.confirmed_wait_for||[];
+  if(!graphs.length){$('confirmedMeta').textContent='—';$('confirmedGraph').innerHTML='<div class="scc"><strong>No confirmed graph</strong>Nothing confirmed on this frame.</div>';return;}
+  const g=graphs[0];
+  $('confirmedMeta').textContent=`tick ${g.captured_at_tick} · ${g.outcome}`;
+  const robots=[...new Set(g.edges.flatMap(e=>[e.waiting_robot_id,e.blocking_robot_id]))].sort();
+  const n=Math.max(robots.length,1),cx=160,cy=76,rad=55,positions={};robots.forEach((id,i)=>{const a=-Math.PI/2+i*2*Math.PI/n;positions[id]=[cx+Math.cos(a)*rad,cy+Math.sin(a)*rad];});
+  let svg='<defs><marker id="c-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0L6 3L0 6z" fill="#a855f7"/></marker></defs>';
+  g.edges.forEach(e=>{const a=positions[e.waiting_robot_id],b=positions[e.blocking_robot_id];if(a&&b)svg+=`<path d="M${a[0]},${a[1]}L${b[0]},${b[1]}" stroke="${e.occupied_blocker?'#f59e0b':'#a855f7'}" stroke-width="2" stroke-dasharray="${e.blocking_in_scope?'none':'3 3'}" marker-end="url(#c-arrow)"/>`;});
+  robots.forEach(id=>{const [x,y]=positions[id];svg+=`<circle cx="${x}" cy="${y}" r="18" fill="#141c21" stroke="${robotColor(id)}" stroke-width="2"/><text x="${x}" y="${y+4}" text-anchor="middle" fill="${robotColor(id)}" font-size="10" font-family="monospace">${esc(id)}</text>`;});
+  $('confirmedGraph').innerHTML=`<svg viewBox="0 0 320 152">${svg}</svg><div class="scc"><strong>state ${esc(g.state)}</strong>${g.edges.length} edges · ${g.cyclic_sccs.length} cyclic scc(s)</div>`;
 }
 function renderEvents(frame){const robot=$('robotFilter').value,kind=$('kindFilter').value,events=frame.events.filter(e=>(!robot||e.robot_id===robot)&&(!kind||e.kind===kind));$('events').innerHTML=events.map(e=>`<div class="event"><span class="seq">#${e.sequence}</span><span class="phase">${esc(e.phase)}</span><span class="kind">${esc(e.kind)}</span><span>${esc(e.robot_id||'global')} ${esc(e.action_ref?.label||'')} ${esc(JSON.stringify(e.details))}</span></div>`).join('')||'<div class="event empty">No matching events at this checkpoint.</div>';}
 
-function render(){const frame=frames[index];$('tickLabel').textContent=`Tick ${frame.tick}`;$('checkpointLabel').textContent=frame.checkpoint;$('slider').value=index;$('frameLabel').textContent=`${index+1} / ${frames.length}`;$('warehouse').innerHTML=mapSvg(frame);renderPlans(frame);renderDetail(frame);renderGraph(frame);renderEvents(frame);document.querySelectorAll('[data-bookmark]').forEach((b,i)=>b.classList.toggle('active',bookmarks[i].event.frameIndex===index));}
+function render(){const frame=frames[index];$('tickLabel').textContent=`Tick ${frame.tick}`;$('checkpointLabel').textContent=frame.checkpoint;$('slider').value=index;$('frameLabel').textContent=`${index+1} / ${frames.length}`;$('warehouse').innerHTML=mapSvg(frame);renderPlans(frame);renderDetail(frame);renderGraph(frame);renderConfirmed(frame);renderEvents(frame);document.querySelectorAll('[data-bookmark]').forEach((b,i)=>b.classList.toggle('active',bookmarks[i].event.frameIndex===index));}
 function move(delta){index=Math.max(0,Math.min(frames.length-1,index+delta));render();}
 function moveTick(delta){const tick=frames[index].tick+delta;const candidates=frames.map((f,i)=>[f,i]).filter(([f])=>f.tick===tick);if(candidates.length){index=delta>0?candidates[0][1]:candidates.at(-1)[1];render();}}
 function stop(){if(timer){clearInterval(timer);timer=null;$('play').textContent='Play';}}

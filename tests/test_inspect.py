@@ -27,6 +27,16 @@ def _artifact() -> dict:
     return recorder.artifact(termination_reason="tick", final_tick=1)
 
 
+def test_inspector_serves_confirmed_wait_for(tmp_path: Path) -> None:
+    artifact = _artifact()
+    for frame in artifact["frames"]:
+        assert "confirmed_wait_for" in frame
+    replay_path = tmp_path / "run.json"
+    replay_path.write_text(replay_json(artifact), encoding="utf-8")
+    server = create_server(replay_path)  # validates against v0.2
+    server.server_close()
+
+
 def test_inspector_validates_and_serves_only_selected_replay(tmp_path: Path) -> None:
     artifact = _artifact()
     replay_path = tmp_path / "run.json"
