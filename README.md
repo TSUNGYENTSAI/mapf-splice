@@ -44,13 +44,12 @@ foundation currently includes:
 - deterministic, schema-versioned runtime replay artifacts and an offline Web
   Inspector that consumes full simulation snapshots;
 - MAPF solution validation and ADG compilation;
-- a legacy static scenario-review renderer.
+- a static scenario-topology renderer.
 
 Confirmed wait-for analysis, hard-deadlock classification, recovery
 orchestration, atomic group plan replacement, recovery ADG execution, metrics,
-and the final animation are not implemented yet. The checked-in image is a
-design-time scenario review, not evidence from a completed simulation. Runtime
-review now uses generated replay artifacts.
+and the final animation are not implemented yet. The checked-in image shows
+scenario topology only; runtime evidence comes from generated replay artifacts.
 
 The canonical design documents are:
 
@@ -78,7 +77,27 @@ Use the **Stable SCC** bookmark to inspect the full `after-preview` snapshot,
 then step forward to containment drain and quiescence. The browser renders
 positions, plans, committed reservations, preview dependencies, SCC state, and
 trace events already computed by Python. It does not reconstruct state, run
-routing or traffic logic, or load `review.json`.
+routing or traffic logic, or consume a parallel route fixture.
+
+The calibrated hero intentionally distinguishes an early two-robot cyclic
+observation from the first candidate that reaches the stability threshold:
+
+| K | first cyclic observation | first stable / containment | quiescence |
+|---|---|---|---|
+| 3 | `R1@2,R3@2` at tick 14 | `R1@2,R2@2,R3@2` at tick 16 | tick 18 |
+| 4 | `R1@2,R3@2` at tick 13 | `R1@2,R2@2,R3@2` at tick 15 | tick 18 |
+| 5 | `R1@2,R3@2` at tick 12 | `R1@2,R2@2,R3@2` at tick 14 | tick 18 |
+
+This is a three-robot **stable prospective SCC**, not yet a confirmed hard
+deadlock. The bootstrap release ticks are `T1=5`, `T2=0`, and `T3=12`; one
+local shelf cell at `(11, 7)` keeps the interaction in the lower loop. Re-run a
+bounded timing experiment with:
+
+```bash
+uv run python tools/calibrate_hero_scenario.py \
+  --scenario scenarios/compact-three-robot/scenario.json \
+  --t1 5 --t2 0 --t3 8:14 --horizons 3,4,5
+```
 
 Each `simulation-run.v0.1` replay contains deterministic full snapshots at
 `tick-start`, `after-completions`, `after-release`, `after-task-advance`,
@@ -89,22 +108,19 @@ and require no network access.
 Confirmed hard deadlock, MAPF recovery, and recovery ADG execution are not yet
 represented as runtime states.
 
-## Render the legacy scenario design
+## Render the scenario topology
 
-The canonical compact scenario separates its map, lifelong workload, and
-review-only route overlay. After `uv sync`, regenerate the checked-in PNG with:
+After `uv sync`, regenerate the checked-in topology PNG directly from the
+canonical scenario and map:
 
 ```bash
 uv run mapf-splice-render \
   --scenario scenarios/compact-three-robot/scenario.json \
-  --review scenarios/compact-three-robot/review.json \
-  --view prospective-scc-k3 \
   --output docs/assets/compact-three-robot-warehouse.png
 ```
 
-This compatibility renderer still reads `review.json`. It is a deprecated
-design fixture and is not used by replay export or inspection. Runtime replay
-is the intended source for future screenshots and animation.
+This renderer draws static topology only. Replay frames are the sole source for
+runtime screenshots, dependency graphs, containment, and future animation.
 
 ## License
 

@@ -32,7 +32,7 @@ packages = ["src/mapf_splice"]
 "schemas/simulation-run.v0.1.schema.json" = "mapf_splice/schemas/simulation-run.v0.1.schema.json"
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "schemas", "tests", "README.md", "LICENSE", "pyproject.toml"]
+include = ["src", "schemas", "tests", "tools", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

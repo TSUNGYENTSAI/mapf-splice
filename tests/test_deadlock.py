@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from mapf_splice.deadlock import DeadlockController
+from mapf_splice.deadlock import DeadlockController, cyclic_sccs
 from mapf_splice.domain import (
     ActionRef,
     Cell,
@@ -16,6 +16,7 @@ from mapf_splice.preview import (
     PreviewAnalysis,
     PreviewContention,
     ProspectiveDependency,
+    analyze_preview,
 )
 from mapf_splice.scenario import load_scenario
 from mapf_splice.simulation import DeterministicSimulator
@@ -57,11 +58,11 @@ def test_stability_requires_consecutive_observations() -> None:
     assert first.observations[0].count == 1
     assert first.stable == ()
     assert second.observations[0].count == 2
-    assert second.stable == ((('R1', 1), ('R2', 1)),)
+    assert second.stable == ((("R1", 1), ("R2", 1)),)
     assert controller.observe(cycle, versions).stable == ()
     assert len(controller.containments) == 1
     immediate = DeadlockController(1).observe(cycle, versions)
-    assert immediate.stable == ((('R1', 1), ('R2', 1)),)
+    assert immediate.stable == ((("R1", 1), ("R2", 1)),)
 
 
 def test_disappearance_membership_and_plan_version_reset_candidates() -> None:
@@ -75,7 +76,7 @@ def test_disappearance_membership_and_plan_version_reset_candidates() -> None:
     controller.observe(two, {"R1": 1, "R2": 1})
 
     disappeared = controller.observe(PreviewAnalysis((), ()), {"R1": 1, "R2": 1})
-    assert disappeared.expired == ((('R1', 1), ('R2', 1)),)
+    assert disappeared.expired == ((("R1", 1), ("R2", 1)),)
     assert controller.observe(two, {"R1": 1, "R2": 1}).observations[0].count == 1
 
     changed = controller.observe(three, {"R1": 1, "R2": 1, "R3": 1})
@@ -165,11 +166,17 @@ def test_new_plan_version_is_not_captured_by_stale_containment() -> None:
     assert not controller.containments[0].valid
 
 
-@pytest.mark.parametrize("horizon", [3, 4, 5])
-def test_runtime_hero_reaches_exact_three_robot_stable_scc(horizon: int) -> None:
-    scenario = load_scenario(
-        ROOT / "scenarios/compact-three-robot/scenario.json"
-    )
+@pytest.mark.parametrize(
+    ("horizon", "cyclic_tick", "stable_tick", "quiescence_tick"),
+    [(3, 14, 16, 18), (4, 13, 15, 18), (5, 12, 14, 18)],
+)
+def test_runtime_hero_first_stable_scc_contains_all_three_robots(
+    horizon: int,
+    cyclic_tick: int,
+    stable_tick: int,
+    quiescence_tick: int,
+) -> None:
+    scenario = load_scenario(ROOT / "scenarios/compact-three-robot/scenario.json")
     assert scenario.data["execution"]["delay_schedule"]["probability"] == 0
     simulator = DeterministicSimulator.from_scenario(
         scenario,
@@ -179,11 +186,12 @@ def test_runtime_hero_reaches_exact_three_robot_stable_scc(horizon: int) -> None
 
     for _ in range(50):
         simulator.tick()
-        if any(
-            event.kind is EventKind.STABLE_SCC_DETECTED
-            and dict(event.details).get("members") == expected
+        stable_events = [
+            event
             for event in simulator.trace.events
-        ):
+            if event.kind is EventKind.STABLE_SCC_DETECTED
+        ]
+        if stable_events:
             break
     else:
         observed = [
@@ -193,28 +201,108 @@ def test_runtime_hero_reaches_exact_three_robot_stable_scc(horizon: int) -> None
         ]
         pytest.fail(f"K={horizon} never reached hero SCC; observed={observed[-10:]}")
 
-
-def test_containment_drains_authorized_progress_then_emits_quiescence_once() -> None:
-    scenario = load_scenario(
-        ROOT / "scenarios/compact-three-robot/scenario.json"
+    first_cyclic = next(
+        event
+        for event in simulator.trace.events
+        if event.kind is EventKind.PROSPECTIVE_SCC_OBSERVED
     )
-    simulator = DeterministicSimulator.from_scenario(scenario, committed_horizon=3)
-    containment_tick = None
-    members = "R1@2,R3@2"
-    for _ in range(30):
-        simulator.tick()
-        matches = [
-            event
-            for event in simulator.trace.events
-            if event.kind is EventKind.CONTAINMENT_STARTED
-            and dict(event.details).get("members") == members
-        ]
-        if matches:
-            containment_tick = matches[0].tick
-            break
-    assert containment_tick is not None
+    assert first_cyclic.tick == cyclic_tick
+    assert dict(first_cyclic.details)["members"] == "R1@2,R3@2"
+    assert stable_events[0].tick == stable_tick
+    assert dict(stable_events[0].details)["members"] == expected
+    containment = [
+        event
+        for event in simulator.trace.events
+        if event.kind is EventKind.CONTAINMENT_STARTED
+    ]
+    assert [(dict(event.details)["members"], event.tick) for event in containment] == [
+        (expected, stable_tick)
+    ]
+
+    analysis = analyze_preview(simulator.world)
+    assert ("R1", "R2", "R3") in cyclic_sccs(analysis)
+    internal = [
+        dependency
+        for dependency in analysis.dependencies
+        if dependency.waiting_robot_id in {"R1", "R2", "R3"}
+        and dependency.blocking_robot_id in {"R1", "R2", "R3"}
+    ]
+    assert (
+        len({(item.waiting_robot_id, item.blocking_robot_id) for item in internal}) >= 3
+    )
+    assert any(
+        len(
+            {
+                item.blocking_robot_id
+                for item in internal
+                if item.waiting_robot_id == robot_id
+            }
+        )
+        >= 2
+        for robot_id in ("R1", "R2", "R3")
+    )
 
     for _ in range(20):
+        simulator.tick()
+        quiescent = [
+            event
+            for event in simulator.trace.events
+            if event.kind is EventKind.QUIESCENCE_REACHED
+        ]
+        if quiescent:
+            break
+    assert [(dict(event.details)["members"], event.tick) for event in quiescent] == [
+        (expected, quiescence_tick)
+    ]
+    for robot_id in ("R1", "R2", "R3"):
+        robot = simulator.world.robots[robot_id]
+        assert robot.active_action_ref is None
+        assert simulator.world.reservations.committed_actions(robot_id, 2) == ()
+        assert any(
+            action.status.value == "planned"
+            for action in simulator.world.plans[robot_id].actions
+        )
+    assert any(
+        event.kind is EventKind.ACTION_COMPLETED
+        and event.robot_id in {"R1", "R2", "R3"}
+        and event.tick > stable_tick
+        for event in simulator.trace.events
+    )
+    assert not any(
+        event.kind is EventKind.ADMISSION_ACCEPTED
+        and event.robot_id in {"R1", "R2", "R3"}
+        and event.tick > stable_tick
+        for event in simulator.trace.events
+    )
+
+
+def test_hero_routes_do_not_change_with_committed_horizon() -> None:
+    scenario = load_scenario(ROOT / "scenarios/compact-three-robot/scenario.json")
+    paths = []
+    for horizon in (3, 4, 5):
+        simulator = DeterministicSimulator.from_scenario(
+            scenario,
+            committed_horizon=horizon,
+        )
+        for _ in range(13):
+            simulator.tick()
+        assert {
+            robot_id: plan.version for robot_id, plan in simulator.world.plans.items()
+        } == {"R1": 2, "R2": 2, "R3": 2}
+        paths.append(
+            {
+                robot_id: tuple((action.start, action.end) for action in plan.actions)
+                for robot_id, plan in sorted(simulator.world.plans.items())
+            }
+        )
+    assert paths[0] == paths[1] == paths[2]
+
+
+def test_containment_emits_quiescence_only_once() -> None:
+    scenario = load_scenario(ROOT / "scenarios/compact-three-robot/scenario.json")
+    simulator = DeterministicSimulator.from_scenario(scenario, committed_horizon=3)
+    members = "R1@2,R2@2,R3@2"
+    for _ in range(40):
         simulator.tick()
         quiescent = [
             event
@@ -225,17 +313,16 @@ def test_containment_drains_authorized_progress_then_emits_quiescence_once() -> 
         if quiescent:
             break
     assert len(quiescent) == 1
-    for robot_id in ("R1", "R3"):
-        robot = simulator.world.robots[robot_id]
-        assert robot.active_action_ref is None
-        assert simulator.world.reservations.committed_actions(robot_id, 2) == ()
-        assert any(
-            action.status.value == "planned"
-            for action in simulator.world.plans[robot_id].actions
+    for _ in range(10):
+        simulator.tick()
+    assert (
+        len(
+            [
+                event
+                for event in simulator.trace.events
+                if event.kind is EventKind.QUIESCENCE_REACHED
+                and dict(event.details).get("members") == members
+            ]
         )
-    assert not any(
-        event.kind is EventKind.ADMISSION_ACCEPTED
-        and event.robot_id in {"R1", "R3"}
-        and event.tick > containment_tick
-        for event in simulator.trace.events
+        == 1
     )

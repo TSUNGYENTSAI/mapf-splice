@@ -59,7 +59,7 @@ def test_replay_contains_topology_and_ordered_full_snapshots() -> None:
 
 
 def test_runtime_evidence_and_containment_are_recorded_at_source() -> None:
-    _, artifact = _recorded(11)
+    _, artifact = _recorded(19)
     preview_frames = [
         frame for frame in artifact["frames"] if frame["checkpoint"] == "after-preview"
     ]

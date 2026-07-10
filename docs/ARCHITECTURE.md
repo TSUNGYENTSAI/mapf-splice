@@ -108,8 +108,7 @@ independently.
 
 ### Scenario and workload data
 
-Scenario inputs keep static topology, runtime policy, and derived visualization
-state separate:
+Scenario inputs keep static topology and runtime policy separate:
 
 - An ASCII map owns only `floor`, `shelf`, `handoff`, and `delivery` cells.
 - A schema-validated scenario owns station identities, initial robots, traffic
@@ -118,22 +117,19 @@ state separate:
 - Lifelong workloads contain explicit bootstrap tasks plus a seeded station-pair
   generator. Experiments still use a finite tick horizon so modes can be
   compared reproducibly.
-- Review overlays contain derived routes, route indices, and prospective
-  dependencies only for the deprecated design-time renderer. They are not
-  runtime truth and never feed the runtime replay exporter or inspector.
+- The calibrated hero releases `T2` at tick 0, `T1` at tick 5, and `T3` at tick
+  12. A shelf at `(11, 7)` directs the three deterministic routes through both
+  rows of the lower loop. This setup makes the first stable and contained
+  prospective SCC include `R1@2`, `R2@2`, and `R3@2` for K=3, 4, and 5; it does
+  not claim that a hard deadlock has been confirmed.
 
-Cross-file validation checks map symbols, station references, unique initial
-occupancy, exact parity between review routes and deterministic A*, route
-adjacency, vertex/edge committed-claim exclusivity, and whether declared
-preview dependencies match occupied or committed resources. Review data is
-temporary compatibility input for static design rendering; it must not be
-treated as runtime evidence or extended into a second traffic implementation.
-
-Both scenario and review loaders apply the same boundary pipeline: JSON parse,
-Draft 2020-12 schema validation, then cross-file semantic validation. Unknown
-properties are rejected at runtime, not only in tests. v0.1 bootstrap robots
-must be empty because a carrying bootstrap would require an explicit payload
-task and phase state. Lifelong task release intervals must be positive.
+Scenario loading applies JSON parse, Draft 2020-12 schema validation, then
+cross-file semantic validation against the ASCII map. Unknown properties are
+rejected at runtime, not only in tests. v0.1 bootstrap robots must be empty
+because a carrying bootstrap would require an explicit payload task and phase
+state. Lifelong task release intervals must be positive. Exact hero routes and
+runtime SCC behavior are executable expectations in routing, deadlock, and
+replay tests.
 
 ### Routing
 
@@ -308,8 +304,8 @@ The schema-versioned replay embeds map topology, authoritative world state,
 plans, action authority, reservations, preview evidence, controller state, and
 new trace events. The offline Web Inspector is a pure replay consumer: playback
 only selects a frame and the browser does not calculate routing, reservations,
-dependencies, SCCs, containment, or quiescence. The old `review.json` renderer
-remains a deprecated design tool and is not part of this runtime path.
+dependencies, SCCs, containment, or quiescence. No parallel route or expected-
+view fixture participates in this runtime path.
 
 `WorldState` is the one mutable authority for the current tick, robots, tasks,
 current plans, and committed reservation ledger. It validates unique occupancy,

@@ -9,15 +9,12 @@ from mapf_splice.dispatch import Assignment, dispatch_pending_tasks
 from mapf_splice.scenario import (
     ScenarioError,
     build_initial_world,
-    load_review,
     load_scenario,
 )
 
 ROOT = Path(__file__).parents[1]
 SCENARIO_PATH = ROOT / "scenarios/compact-three-robot/scenario.json"
-REVIEW_PATH = ROOT / "scenarios/compact-three-robot/review.json"
 SCENARIO_SCHEMA = ROOT / "schemas/scenario.v0.1.schema.json"
-REVIEW_SCHEMA = ROOT / "schemas/render-review.v0.1.schema.json"
 
 
 def _validate_json(instance_path: Path, schema_path: Path) -> None:
@@ -30,9 +27,8 @@ def _use_schema(data: dict, schema_path: Path) -> None:
     data["$schema"] = str(schema_path.resolve())
 
 
-def test_scenario_and_review_match_json_schemas() -> None:
+def test_scenario_matches_json_schema() -> None:
     _validate_json(SCENARIO_PATH, SCENARIO_SCHEMA)
-    _validate_json(REVIEW_PATH, REVIEW_SCHEMA)
 
 
 def test_lifelong_scenario_cross_file_invariants() -> None:
@@ -62,74 +58,16 @@ def test_scenario_builds_authoritative_initial_world() -> None:
         scenario.stations["P3"]: "R3",
     }
     assert set(world.tasks) == {"T1", "T2", "T3"}
+    assert {task_id: task.release_tick for task_id, task in world.tasks.items()} == {
+        "T1": 5,
+        "T2": 0,
+        "T3": 12,
+    }
 
     assert dispatch_pending_tasks(
         world,
         is_traversable=scenario.warehouse_map.is_traversable,
-    ) == (
-        Assignment("T1", "R1", 0),
-        Assignment("T2", "R2", 0),
-        Assignment("T3", "R3", 0),
-    )
-
-
-def test_review_views_derive_three_robot_prospective_sccs() -> None:
-    scenario = load_scenario(SCENARIO_PATH)
-    review = load_review(REVIEW_PATH, scenario)
-
-    assert [view["committed_horizon"] for view in review["views"]] == [3, 4, 5]
-    for view in review["views"]:
-        edges = {
-            (edge["waiting_robot_id"], edge["blocking_robot_id"])
-            for edge in view["prospective_dependencies"]
-        }
-        assert {("R1", "R2"), ("R2", "R3"), ("R3", "R1")} <= edges
-
-
-def test_review_rejects_duplicate_robot_routes(tmp_path: Path) -> None:
-    scenario = load_scenario(SCENARIO_PATH)
-    review = json.loads(REVIEW_PATH.read_text())
-    _use_schema(review, REVIEW_SCHEMA)
-    duplicate = deepcopy(review["routes"][0])
-    duplicate["cells"][0] = {"row": 1, "col": 4}
-    review["routes"].append(duplicate)
-    path = tmp_path / "duplicate-route.json"
-    path.write_text(json.dumps(review))
-
-    with pytest.raises(ScenarioError, match="duplicate review route"):
-        load_review(path, scenario)
-
-
-def test_review_route_must_equal_runtime_astar_route(tmp_path: Path) -> None:
-    scenario = load_scenario(SCENARIO_PATH)
-    review = json.loads(REVIEW_PATH.read_text())
-    _use_schema(review, REVIEW_SCHEMA)
-    alternative = (
-        (14, 10),
-        (13, 10),
-        (12, 10),
-        (11, 10),
-        (10, 10),
-        (10, 9),
-        (10, 8),
-        (10, 7),
-        (9, 7),
-        (8, 7),
-        (7, 7),
-        (7, 6),
-        (7, 5),
-        (7, 4),
-        (7, 3),
-        (7, 2),
-    )
-    review["routes"][2]["cells"] = [
-        {"row": row, "col": col} for row, col in alternative
-    ]
-    path = tmp_path / "alternative-shortest-route.json"
-    path.write_text(json.dumps(review))
-
-    with pytest.raises(ScenarioError, match=r"does not match deterministic A\*"):
-        load_review(path, scenario)
+    ) == (Assignment("T2", "R2", 0),)
 
 
 def test_bootstrap_tasks_cannot_share_a_pickup_station(tmp_path: Path) -> None:
