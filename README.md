@@ -41,15 +41,19 @@ foundation currently includes:
 - append-only event tracing and read-only prospective dependency evidence;
 - plan-version-scoped stable SCC detection, containment, and deterministic
   quiescence;
+- single-incident confirmed wait-for analysis that classifies a quiescent
+  containment as a hard reservation deadlock, a cleared false positive, or an
+  unsupported external dependency;
 - deterministic, schema-versioned runtime replay artifacts and an offline Web
   Inspector that consumes full simulation snapshots;
 - MAPF solution validation and ADG compilation;
 - a static scenario-topology renderer.
 
-Confirmed wait-for analysis, hard-deadlock classification, recovery
-orchestration, atomic group plan replacement, recovery ADG execution, metrics,
-and the final animation are not implemented yet. The checked-in image shows
-scenario topology only; runtime evidence comes from generated replay artifacts.
+Recovery orchestration, atomic group plan replacement, recovery ADG execution,
+metrics, and the final animation are not implemented yet. Confirmation is
+classify-and-record only: it never calls MAPF or mutates a plan. The checked-in
+image shows scenario topology only; runtime evidence comes from generated replay
+artifacts.
 
 The canonical design documents are:
 
@@ -74,10 +78,12 @@ uv run mapf-splice-inspect artifacts/hero-k3.run.json
 ```
 
 Use the **Stable SCC** bookmark to inspect the full `after-preview` snapshot,
-then step forward to containment drain and quiescence. The browser renders
-positions, plans, committed reservations, preview dependencies, SCC state, and
-trace events already computed by Python. It does not reconstruct state, run
-routing or traffic logic, or consume a parallel route fixture.
+then step forward through containment drain and quiescence to the **Confirmed**
+and **Hard deadlock** bookmarks and the `after-confirmation` frame. The browser
+renders positions, plans, committed reservations, prospective dependencies, the
+confirmed wait-for graph, containment state, and trace events already computed by
+Python. It does not reconstruct state, run routing or traffic logic, or consume a
+parallel route fixture.
 
 The calibrated hero intentionally distinguishes an early two-robot cyclic
 observation from the first candidate that reaches the stability threshold:
@@ -88,10 +94,15 @@ observation from the first candidate that reaches the stability threshold:
 | 4 | `R1@2,R3@2` at tick 13 | `R1@2,R2@2,R3@2` at tick 15 | tick 18 |
 | 5 | `R1@2,R3@2` at tick 12 | `R1@2,R2@2,R3@2` at tick 14 | tick 18 |
 
-This is a three-robot **stable prospective SCC**, not yet a confirmed hard
-deadlock. The bootstrap release ticks are `T1=5`, `T2=0`, and `T3=12`; one
-local shelf cell at `(11, 7)` keeps the interaction in the lower loop. Re-run a
-bounded timing experiment with:
+This is a three-robot **stable prospective SCC**. After the scope drains to
+quiescence at tick 18, single-incident confirmation rebuilds an authoritative
+wait-for graph from each member's first unfinished action and classifies it as a
+**confirmed hard deadlock** for K=3, 4, and 5. The confirmed cycle is the
+two-robot `R1 <-> R2` mutual-occupancy loop; `R3` waits into that cycle and is
+transitively blocked, so the containment scope (three robots) is deliberately
+larger than the confirmed cycle (two robots). The bootstrap release ticks are
+`T1=5`, `T2=0`, and `T3=12`; one local shelf cell at `(11, 7)` keeps the
+interaction in the lower loop. Re-run a bounded timing experiment with:
 
 ```bash
 uv run python tools/calibrate_hero_scenario.py \
@@ -99,14 +110,16 @@ uv run python tools/calibrate_hero_scenario.py \
   --t1 5 --t2 0 --t3 8:14 --horizons 3,4,5
 ```
 
-Each `simulation-run.v0.1` replay contains deterministic full snapshots at
+Each `simulation-run.v0.2` replay contains deterministic full snapshots at
 `tick-start`, `after-completions`, `after-release`, `after-task-advance`,
-`after-admission`, `after-action-start`, and `after-preview`. The JSON Schema is
-under `schemas/`; the inspector assets are packaged in the Python distribution
-and require no network access.
+`after-admission`, `after-action-start`, `after-preview`, and
+`after-confirmation`. The JSON Schema is under `schemas/`; the inspector assets
+are packaged in the Python distribution and require no network access.
 
-Confirmed hard deadlock, MAPF recovery, and recovery ADG execution are not yet
-represented as runtime states.
+Confirmed hard deadlock is a runtime state, rendered in the inspector's confirmed
+wait-for panel. MAPF recovery and recovery ADG execution are not yet represented
+as runtime states; a confirmed or unsupported incident simply holds its
+containment awaiting the future scoped-MAPF milestone.
 
 ## Render the scenario topology
 

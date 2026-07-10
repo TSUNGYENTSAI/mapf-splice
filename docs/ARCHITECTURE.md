@@ -232,8 +232,35 @@ or reservation state and does not invoke MAPF.
 
 A containment is quiescent only when every scoped plan version is still current
 and has no active action, running action, or committed reservation. Remaining
-planned actions are preserved. Quiescence is emitted once and is not evidence
-of a confirmed hard deadlock; confirmation belongs to the next milestone.
+planned actions are preserved. Quiescence is emitted once.
+
+#### Confirmed wait-for graph (v0.1 single-incident reference mode)
+
+A stable prospective SCC is only a cyclic *risk*. Once a containment is
+quiescent, confirmation rebuilds an authoritative wait-for graph and decides, one
+time, whether that risk is a real reservation deadlock. The two graphs are
+deliberately distinct: the prospective graph looks ahead over the preview horizon
+during normal traffic, while the confirmed graph is built after quiescence from
+each member's first unfinished action using the same committed-reservation
+conflict semantics as admission. The confirmed graph is facts-only evidence —
+waiting action, required resource, committed and occupied blockers, in-scope
+versus external blocker, deterministic directed edges, and cyclic SCCs — and
+carries no classification field.
+
+Classification is separate policy. An internal cycle is a confirmed hard
+deadlock. An acyclic, fully in-scope graph is a cleared false positive: the
+incident is released and normal admission resumes on the next tick. A blocker
+outside the containment scope is an unsupported external dependency. v0.1 is a
+deliberately limited reference mode: at most one active containment incident
+exists globally, an unsupported incident is held with its evidence but neither
+expanded nor automatically re-evaluated, and confirmation never calls MAPF or
+mutates a plan. Recovery-group expansion, external re-evaluation, and scoped MAPF
+recovery are future work.
+
+In the calibrated hero the confirmed cycle is the two-robot `R1 <-> R2`
+mutual-occupancy loop while the containment scope is all three robots; `R3` waits
+into that cycle and is transitively blocked. The confirmed hard deadlock is
+therefore reported over a three-robot scope with a two-robot cycle.
 
 ### Recovery orchestration
 
@@ -296,9 +323,10 @@ without nondeterministic threads.
 
 The simulator owns a deterministic phased tick loop and configured action-delay
 schedule. Each tick completes due actions, releases resources, evaluates new
-requests from a stable snapshot, starts admitted actions, and records trace
-output in a fixed order. A read-only recorder captures full immutable snapshots
-at seven named checkpoints without advancing actions or changing reservations.
+requests from a stable snapshot, starts admitted actions, confirms a quiescent
+containment, and records trace output in a fixed order. A read-only recorder
+captures full immutable snapshots at eight named checkpoints without advancing
+actions or changing reservations.
 
 The schema-versioned replay embeds map topology, authoritative world state,
 plans, action authority, reservations, preview evidence, controller state, and
@@ -329,8 +357,9 @@ The normal execution tick is fixed as:
 8. collect eligible starts from one snapshot;
 9. start every validated action;
 10. generate read-only preview evidence;
-11. append events in deterministic order;
-12. advance the tick.
+11. confirm a quiescent containment into the confirmed wait-for graph;
+12. append events in deterministic order;
+13. advance the tick.
 
 While a move runs, the robot position remains the action source and its edge
 and target claims stay committed. Completion alone transfers position to the
