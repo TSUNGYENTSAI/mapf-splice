@@ -47,7 +47,7 @@ def test_replay_contains_topology_and_ordered_full_snapshots() -> None:
         "handoff",
         "delivery",
     }
-    assert [frame["checkpoint"] for frame in artifact["frames"][:7]] == list(
+    assert [frame["checkpoint"] for frame in artifact["frames"][:8]] == list(
         CHECKPOINTS
     )
     order = {checkpoint: index for index, checkpoint in enumerate(CHECKPOINTS)}
@@ -84,6 +84,19 @@ def test_replay_records_map_content_hash_distinct_from_scenario() -> None:
     ).hexdigest()
     assert artifact["map_content_hash"] == expected
     assert artifact["map_content_hash"] != artifact["scenario_content_hash"]
+    validate_replay(artifact)
+
+
+def test_after_confirmation_checkpoint_present_and_schema_v2() -> None:
+    _, artifact = _recorded(2)
+    assert "after-confirmation" in artifact["checkpoint_names"]
+    assert artifact["schema_version"] == "simulation-run.v0.2"
+    assert artifact["$schema"] == "simulation-run.v0.2.schema.json"
+    assert [frame["checkpoint"] for frame in artifact["frames"][:8]] == list(
+        CHECKPOINTS
+    )
+    for frame in artifact["frames"]:
+        assert isinstance(frame["confirmed_wait_for"], list)
     validate_replay(artifact)
 
 

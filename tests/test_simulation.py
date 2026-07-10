@@ -117,6 +117,13 @@ def test_same_tick_completions_apply_as_one_deterministic_batch() -> None:
     assert [event.robot_id for event in completion_events] == ["R1", "R2"]
 
 
+def test_tick_runs_confirm_step_after_preview() -> None:
+    simulator = _simulator()
+    simulator.tick()
+    phases = [event.phase for event in simulator.trace.events if event.tick == 0]
+    assert phases == sorted(phases)
+
+
 def test_hero_scenario_produces_identical_seeded_trace() -> None:
     scenario_path = ROOT / "scenarios/compact-three-robot/scenario.json"
     left = DeterministicSimulator.from_scenario(load_scenario(scenario_path))

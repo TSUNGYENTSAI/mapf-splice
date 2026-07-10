@@ -30,6 +30,7 @@ CHECKPOINTS = (
     "after-admission",
     "after-action-start",
     "after-preview",
+    "after-confirmation",
 )
 
 
@@ -76,6 +77,33 @@ def _event(event: TraceEvent) -> dict[str, Any]:
         "task_id": event.task_id,
         "action_ref": _ref(event.action_ref),
         "details": {key: value for key, value in event.details},
+    }
+
+
+def _confirmed_edge(edge) -> dict[str, Any]:
+    return {
+        "waiting_robot_id": edge.waiting_robot_id,
+        "waiting_plan_version": edge.waiting_plan_version,
+        "waiting_action_ref": _ref(edge.waiting_action_ref),
+        "resource": _resource(edge.resource),
+        "blocking_robot_id": edge.blocking_robot_id,
+        "blocking_plan_version": edge.blocking_plan_version,
+        "committed_blocker_refs": [_ref(ref) for ref in edge.committed_blocker_refs],
+        "occupied_blocker": edge.occupied_blocker,
+        "blocking_in_scope": edge.blocking_in_scope,
+    }
+
+
+def _confirmed_graph(containment) -> dict[str, Any]:
+    graph = containment.confirmed_graph
+    return {
+        "scope": _identity(graph.scope),
+        "epoch": graph.epoch,
+        "captured_at_tick": graph.captured_at_tick,
+        "outcome": containment.outcome.value if containment.outcome else None,
+        "state": containment.state.value,
+        "edges": [_confirmed_edge(edge) for edge in graph.edges],
+        "cyclic_sccs": [list(scc) for scc in graph.cyclic_sccs],
     }
 
 
@@ -259,6 +287,11 @@ class FrameRecorder:
                         for value in (deadlock_update.stable if deadlock_update else ())
                     ],
                 },
+                "confirmed_wait_for": [
+                    _confirmed_graph(containment)
+                    for containment in controller_state.containments
+                    if containment.confirmed_graph is not None
+                ],
                 "events": [_event(value) for value in events],
             }
         )
@@ -279,8 +312,8 @@ class FrameRecorder:
             git_commit = None
         stations_by_id = {item["id"]: item for item in self.scenario.data["stations"]}
         return {
-            "$schema": "simulation-run.v0.1.schema.json",
-            "schema_version": "simulation-run.v0.1",
+            "$schema": "simulation-run.v0.2.schema.json",
+            "schema_version": "simulation-run.v0.2",
             "scenario_id": self.scenario.data["id"],
             "committed_horizon": self._committed_horizon,
             "stable_scc_observation_threshold": self.scenario.data["deadlock_analysis"][
@@ -311,12 +344,12 @@ def replay_json(data: dict[str, Any]) -> str:
 
 
 def _schema() -> dict[str, Any]:
-    path = Path(__file__).parents[2] / "schemas" / "simulation-run.v0.1.schema.json"
+    path = Path(__file__).parents[2] / "schemas" / "simulation-run.v0.2.schema.json"
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     return json.loads(
         resources.files("mapf_splice")
-        .joinpath("schemas/simulation-run.v0.1.schema.json")
+        .joinpath("schemas/simulation-run.v0.2.schema.json")
         .read_text()
     )
 

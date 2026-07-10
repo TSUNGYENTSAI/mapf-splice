@@ -29,7 +29,7 @@ dev = [
 packages = ["src/mapf_splice"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"schemas/simulation-run.v0.1.schema.json" = "mapf_splice/schemas/simulation-run.v0.1.schema.json"
+"schemas/simulation-run.v0.2.schema.json" = "mapf_splice/schemas/simulation-run.v0.2.schema.json"
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "schemas", "tests", "tools", "README.md", "LICENSE", "pyproject.toml"]
