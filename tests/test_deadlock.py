@@ -471,3 +471,37 @@ def test_classify_confirmation_prefers_internal_cycle() -> None:
         cyclic_sccs=(("R1", "R2"),),
     )
     assert classify_confirmation(graph) is ConfirmationOutcome.CONFIRMED_DEADLOCK
+
+
+@pytest.mark.parametrize("horizon", [3, 4, 5])
+def test_hero_reaches_quiescence_then_confirms(horizon: int) -> None:
+    scenario = load_scenario(ROOT / "scenarios/compact-three-robot/scenario.json")
+    simulator = DeterministicSimulator.from_scenario(
+        scenario, committed_horizon=horizon
+    )
+    for _ in range(60):
+        simulator.tick()
+        built = [
+            event
+            for event in simulator.trace.events
+            if event.kind is EventKind.CONFIRMED_WAIT_FOR_BUILT
+        ]
+        if built:
+            break
+    assert built, f"K={horizon} never ran confirmation"
+    outcome = dict(built[0].details)["outcome"]
+    members = dict(built[0].details)["members"]
+    assert members == "R1@2,R2@2,R3@2"
+    # Empirical outcome of the confirmation algorithm on the hero scenario:
+    # the three robots form a real internal-cycle hard reservation deadlock.
+    assert outcome == "confirmed-deadlock"
+    hard = [
+        event
+        for event in simulator.trace.events
+        if event.kind is EventKind.HARD_DEADLOCK_CONFIRMED
+    ]
+    assert [dict(event.details)["members"] for event in hard] == ["R1@2,R2@2,R3@2"]
+    assert (
+        simulator.deadlock_controller.containments[0].state
+        is ContainmentState.CONFIRMED_DEADLOCK
+    )
