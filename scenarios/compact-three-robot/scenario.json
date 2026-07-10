@@ -28,9 +28,12 @@
     "delay_schedule": {
       "type": "seeded_extra_wait",
       "seed": 3107,
-      "probability": 0.2,
+      "probability": 0.0,
       "extra_wait_ticks": {"minimum": 1, "maximum": 2}
     }
+  },
+  "deadlock_analysis": {
+    "stable_scc_observation_threshold": 2
   },
   "fleet": {
     "robots": [

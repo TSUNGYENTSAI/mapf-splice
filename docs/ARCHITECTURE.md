@@ -218,6 +218,25 @@ changes.
 The graph algorithm is replaceable. Tarjan's algorithm is an implementation
 choice, not a product feature.
 
+One stability observation occurs per preview phase. Candidate identity is the
+sorted set of `(robot_id, current_plan_version)` members in a maximal cyclic
+SCC; changing concrete resources or action references does not change identity.
+The default policy threshold is two consecutive observations and is scenario
+configurable with a minimum of one. Disappearance, membership change, or a plan
+version change resets the old candidate. Action completion does not reset it
+directly: the next preview graph determines whether the same candidate remains.
+
+When a candidate first reaches the threshold, containment records exactly its
+plan-version-scoped SCC core. Beginning with the next tick, contained plans no
+longer request replenishment. Running and already committed actions still start,
+finish, and release normally. Containment does not modify position, task, plan,
+or reservation state and does not invoke MAPF.
+
+A containment is quiescent only when every scoped plan version is still current
+and has no active action, running action, or committed reservation. Remaining
+planned actions are preserved. Quiescence is emitted once and is not evidence
+of a confirmed hard deadlock; confirmation belongs to the next milestone.
+
 ### Recovery orchestration
 
 Coordinates the transition from normal traffic to scoped MAPF recovery:

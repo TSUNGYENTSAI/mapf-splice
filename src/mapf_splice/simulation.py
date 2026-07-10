@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from mapf_splice.deadlock import CandidateIdentity, DeadlockController
 from mapf_splice.delay import DeterministicDelaySchedule
 from mapf_splice.dispatch import dispatch_pending_tasks
 from mapf_splice.domain import Action, ActionStatus, Cell, TaskStatus
@@ -26,6 +27,7 @@ class DeterministicSimulator:
     delay_schedule: DeterministicDelaySchedule
     base_action_duration_ticks: int = 1
     trace: EventTrace = field(default_factory=EventTrace)
+    deadlock_controller: DeadlockController = field(default_factory=DeadlockController)
 
     def __post_init__(self) -> None:
         if self.base_action_duration_ticks < 1:
@@ -53,6 +55,11 @@ class DeterministicSimulator:
                 maximum_extra_ticks=delay["extra_wait_ticks"]["maximum"],
             ),
             base_action_duration_ticks=execution["base_move_duration_ticks"],
+            deadlock_controller=DeadlockController(
+                scenario.data["deadlock_analysis"][
+                    "stable_scc_observation_threshold"
+                ]
+            ),
         )
 
     def _running_actions(self) -> tuple[tuple[str, Action], ...]:
@@ -251,14 +258,16 @@ class DeterministicSimulator:
                     progress = True
 
     def _admit(self) -> None:
-        plans = tuple(
-            plan
-            for _, plan in sorted(self.world.plans.items())
-            if any(
-                action.status is not ActionStatus.COMPLETED
-                for action in plan.actions
-            )
-        )
+        plans_list = []
+        for _, plan in sorted(self.world.plans.items()):
+            if all(action.status is ActionStatus.COMPLETED for action in plan.actions):
+                continue
+            if self.deadlock_controller.is_contained(plan, self.world):
+                if not self.world.reservations.plan_initialized(plan):
+                    raise WorldStateError("contained plan was not initially admitted")
+                continue
+            plans_list.append(plan)
+        plans = tuple(plans_list)
         modes = {
             plan.robot_id: (
                 "replenish"
@@ -372,6 +381,55 @@ class DeterministicSimulator:
                     ("robot_ids", ",".join(contention.robot_ids)),
                 ),
             )
+        versions = {
+            robot_id: robot.plan_version
+            for robot_id, robot in self.world.robots.items()
+        }
+        update = self.deadlock_controller.observe(analysis, versions)
+        for observation in update.observations:
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.PREVIEW,
+                kind=EventKind.PROSPECTIVE_SCC_OBSERVED,
+                details=(
+                    ("members", self._identity_label(observation.identity)),
+                    ("observation_count", observation.count),
+                ),
+            )
+        for identity in update.stable:
+            details = (("members", self._identity_label(identity)),)
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.PREVIEW,
+                kind=EventKind.STABLE_SCC_DETECTED,
+                details=details,
+            )
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.PREVIEW,
+                kind=EventKind.CONTAINMENT_STARTED,
+                details=details,
+            )
+        for identity in update.expired:
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.PREVIEW,
+                kind=EventKind.CANDIDATE_EXPIRED,
+                details=(("members", self._identity_label(identity)),),
+            )
+        for identity in self.deadlock_controller.newly_quiescent(self.world):
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.PREVIEW,
+                kind=EventKind.QUIESCENCE_REACHED,
+                details=(("members", self._identity_label(identity)),),
+            )
+
+    @staticmethod
+    def _identity_label(identity: CandidateIdentity) -> str:
+        return ",".join(
+            f"{robot_id}@{plan_version}" for robot_id, plan_version in identity
+        )
 
     def tick(self) -> None:
         due = self._complete_due_actions()

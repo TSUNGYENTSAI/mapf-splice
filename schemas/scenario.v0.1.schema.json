@@ -11,6 +11,7 @@
     "stations",
     "traffic",
     "execution",
+    "deadlock_analysis",
     "fleet",
     "dispatcher",
     "task_stream"
@@ -79,6 +80,18 @@
             "probability": {"type": "number", "minimum": 0, "maximum": 1},
             "extra_wait_ticks": {"$ref": "#/$defs/integer_range"}
           }
+        }
+      }
+    },
+    "deadlock_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stable_scc_observation_threshold"],
+      "properties": {
+        "stable_scc_observation_threshold": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2
         }
       }
     },

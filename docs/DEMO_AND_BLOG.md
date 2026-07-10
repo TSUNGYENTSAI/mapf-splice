@@ -18,7 +18,10 @@ The demo uses a compact warehouse grid with:
 - enough alternate space for meaningful retreat and passing maneuvers;
 - a continuous, deterministic task stream;
 - visually distinct empty and carrying robots;
-- a seeded delay schedule shared by every comparison mode.
+- a deterministic timing policy shared by every comparison mode. The canonical
+  hero uses zero normal-operation delay so topology and traffic policy alone
+  establish the SCC; an explicit delayed recovery action later demonstrates
+  asynchronous ADG execution.
 
 The first scenario should create deadlocks naturally from task traffic rather
 than start in a pre-constructed deadlock configuration.

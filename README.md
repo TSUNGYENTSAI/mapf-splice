@@ -39,13 +39,15 @@ foundation currently includes:
 - atomic committed-droplet admission with rolling release and replenishment;
 - deterministic phased normal execution with ActionRef-derived delays;
 - append-only event tracing and read-only prospective dependency evidence;
+- plan-version-scoped stable SCC detection, containment, and deterministic
+  quiescence;
 - MAPF solution validation and ADG compilation;
 - a static scenario-review renderer.
 
-Dependency history, SCC stability, containment, confirmed deadlock analysis,
-recovery orchestration, atomic group plan replacement, recovery ADG execution,
-metrics, and the final animation are not implemented yet. The checked-in image
-is a design-time scenario review, not evidence from a completed simulation.
+Confirmed wait-for analysis, hard-deadlock classification, recovery
+orchestration, atomic group plan replacement, recovery ADG execution, metrics,
+and the final animation are not implemented yet. The checked-in image is a
+design-time scenario review, not evidence from a completed simulation.
 
 The canonical design documents are:
 

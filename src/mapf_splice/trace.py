@@ -33,6 +33,11 @@ class EventKind(StrEnum):
     ACTION_STARTED = "action-started"
     PROSPECTIVE_DEPENDENCY = "prospective-dependency"
     PREVIEW_CONTENTION = "preview-contention"
+    PROSPECTIVE_SCC_OBSERVED = "prospective-scc-observed"
+    STABLE_SCC_DETECTED = "stable-scc-detected"
+    CONTAINMENT_STARTED = "containment-started"
+    CANDIDATE_EXPIRED = "candidate-expired"
+    QUIESCENCE_REACHED = "quiescence-reached"
     TICK_ADVANCED = "tick-advanced"
 
 
