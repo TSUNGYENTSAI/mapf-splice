@@ -321,7 +321,13 @@ def render_scenario(
         )
         draw.text(
             (margin, summary_y + swatch_size),
-            "Prospective SCC: R1 -> R2 -> R3 -> R1",
+            "Prospective dependency edges: "
+            + ", ".join(
+                sorted(
+                    f"{edge['waiting_robot_id']}->{edge['blocking_robot_id']}"
+                    for edge in selected_view["prospective_dependencies"]
+                )
+            ),
             font=legend_font,
             fill=MUTED_TEXT,
         )

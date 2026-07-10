@@ -1,24 +1,16 @@
 from __future__ import annotations
 
 import json
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mapf_splice.domain import Cell, EdgeResource, Resource, VertexResource
+from mapf_splice.routing import RoutePath, find_path
+
 
 class ScenarioError(ValueError):
     """Raised when scenario data violates a cross-file invariant."""
-
-
-@dataclass(frozen=True, order=True, slots=True)
-class Cell:
-    row: int
-    col: int
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> Cell:
-        return cls(row=int(value["row"]), col=int(value["col"]))
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +83,10 @@ def load_scenario(path: Path) -> ScenarioBundle:
         if station_id in stations:
             raise ScenarioError(f"duplicate station id: {station_id}")
         cell = Cell.from_dict(station["cell"])
-        expected_symbol = "P" if station["kind"] == "handoff" else "D"
+        kind = station["kind"]
+        if kind not in {"handoff", "delivery"}:
+            raise ScenarioError(f"station {station_id} has invalid kind {kind!r}")
+        expected_symbol = "P" if kind == "handoff" else "D"
         if warehouse_map.symbol_at(cell) != expected_symbol:
             raise ScenarioError(
                 f"station {station_id} expects {expected_symbol} at {cell}"
@@ -100,7 +95,7 @@ def load_scenario(path: Path) -> ScenarioBundle:
             raise ScenarioError(f"multiple stations share cell {cell}")
         station_cells.add(cell)
         stations[station_id] = cell
-        station_kinds[station_id] = station["kind"]
+        station_kinds[station_id] = kind
 
     marked_station_cells = {
         Cell(row, col)
@@ -128,6 +123,7 @@ def load_scenario(path: Path) -> ScenarioBundle:
         robot_start_ids.add(robot["start_station_id"])
 
     task_ids: set[str] = set()
+    bootstrap_pickup_ids: set[str] = set()
     for task in data["task_stream"]["initial_tasks"]:
         task_id = task["id"]
         if task_id in task_ids:
@@ -135,6 +131,9 @@ def load_scenario(path: Path) -> ScenarioBundle:
         task_ids.add(task_id)
         if task["pickup_station_id"] not in handoff_ids:
             raise ScenarioError(f"task {task_id} has invalid pickup station")
+        if task["pickup_station_id"] in bootstrap_pickup_ids:
+            raise ScenarioError("bootstrap tasks cannot share a pickup station")
+        bootstrap_pickup_ids.add(task["pickup_station_id"])
         if task["delivery_station_id"] not in delivery_ids:
             raise ScenarioError(f"task {task_id} has invalid delivery station")
 
@@ -166,21 +165,14 @@ def _route_cells(route: dict[str, Any]) -> tuple[Cell, ...]:
     return tuple(Cell.from_dict(cell) for cell in route["cells"])
 
 
-def _shortest_distance(
-    warehouse_map: WarehouseMap, start: Cell, goal: Cell
-) -> int | None:
-    queue = deque([(start, 0)])
-    visited = {start}
-    while queue:
-        cell, distance = queue.popleft()
-        if cell == goal:
-            return distance
-        for row_offset, col_offset in ((-1, 0), (0, 1), (1, 0), (0, -1)):
-            neighbor = Cell(cell.row + row_offset, cell.col + col_offset)
-            if warehouse_map.is_traversable(neighbor) and neighbor not in visited:
-                visited.add(neighbor)
-                queue.append((neighbor, distance + 1))
-    return None
+def _action_resources(route: tuple[Cell, ...], start: int, end: int) -> set[Resource]:
+    resources: set[Resource] = set()
+    for index in range(start, min(end, len(route) - 1)):
+        source = route[index]
+        target = route[index + 1]
+        resources.add(VertexResource(target))
+        resources.add(EdgeResource(source, target))
+    return resources
 
 
 def load_review(path: Path, scenario: ScenarioBundle) -> dict[str, Any]:
@@ -191,7 +183,12 @@ def load_review(path: Path, scenario: ScenarioBundle) -> dict[str, Any]:
         raise ScenarioError("render review scenario_id does not match scenario")
 
     robot_ids = {robot["id"] for robot in scenario.data["fleet"]["robots"]}
-    routes = {route["robot_id"]: _route_cells(route) for route in data["routes"]}
+    routes: dict[str, tuple[Cell, ...]] = {}
+    for route in data["routes"]:
+        robot_id = route["robot_id"]
+        if robot_id in routes:
+            raise ScenarioError(f"duplicate review route for {robot_id}")
+        routes[robot_id] = _route_cells(route)
     if set(routes) != robot_ids:
         raise ScenarioError("render review must define one route for every robot")
 
@@ -224,11 +221,15 @@ def load_review(path: Path, scenario: ScenarioBundle) -> dict[str, Any]:
             raise ScenarioError(
                 f"route for {robot_id} does not reach its bootstrap goal"
             )
-        shortest_distance = _shortest_distance(
-            scenario.warehouse_map, cells[0], cells[-1]
+        runtime_route = find_path(
+            cells[0],
+            cells[-1],
+            is_traversable=scenario.warehouse_map.is_traversable,
         )
-        if shortest_distance != len(cells) - 1:
-            raise ScenarioError(f"route for {robot_id} is not a shortest path")
+        if not isinstance(runtime_route, RoutePath) or runtime_route.cells != cells:
+            raise ScenarioError(
+                f"review route for {robot_id} does not match deterministic A*"
+            )
 
     horizon = scenario.data["traffic"]["committed_horizon"]
     for view in data["views"]:
@@ -239,8 +240,9 @@ def load_review(path: Path, scenario: ScenarioBundle) -> dict[str, Any]:
         if set(indices) != robot_ids:
             raise ScenarioError(f"view {view['id']} must position every robot")
 
-        committed: dict[str, set[Cell]] = {}
-        preview: dict[str, set[Cell]] = {}
+        committed: dict[str, set[Resource]] = {}
+        preview: dict[str, set[Resource]] = {}
+        occupied: dict[str, VertexResource] = {}
         positions: set[Cell] = set()
         for robot_id, route in routes.items():
             index = indices[robot_id]
@@ -249,8 +251,13 @@ def load_review(path: Path, scenario: ScenarioBundle) -> dict[str, Any]:
             if route[index] in positions:
                 raise ScenarioError(f"robots overlap in view {view['id']}")
             positions.add(route[index])
-            committed[robot_id] = set(route[index + 1 : index + 1 + k])
-            preview[robot_id] = set(route[index + 1 + k : index + 1 + 2 * k])
+            occupied[robot_id] = VertexResource(route[index])
+            committed[robot_id] = _action_resources(route, index, index + k)
+            preview[robot_id] = _action_resources(
+                route,
+                index + k,
+                index + 2 * k,
+            )
 
         robot_list = sorted(robot_ids)
         for offset, robot_id in enumerate(robot_list):
@@ -259,18 +266,27 @@ def load_review(path: Path, scenario: ScenarioBundle) -> dict[str, Any]:
                     raise ScenarioError(
                         f"committed claims overlap in view {view['id']}"
                     )
+                if occupied[robot_id] in committed[other_id] or occupied[
+                    other_id
+                ] in committed[robot_id]:
+                    raise ScenarioError(
+                        f"committed claim enters occupied cell in view {view['id']}"
+                    )
 
         derived_dependencies = {
             (waiting_id, blocking_id)
             for waiting_id in robot_ids
             for blocking_id in robot_ids
             if waiting_id != blocking_id
-            and preview[waiting_id] & committed[blocking_id]
+            and preview[waiting_id]
+            & (committed[blocking_id] | {occupied[blocking_id]})
         }
         declared_dependencies = {
             (edge["waiting_robot_id"], edge["blocking_robot_id"])
             for edge in view["prospective_dependencies"]
         }
+        if len(declared_dependencies) != len(view["prospective_dependencies"]):
+            raise ScenarioError(f"view {view['id']} has duplicate dependencies")
         if declared_dependencies != derived_dependencies:
             raise ScenarioError(
                 f"view {view['id']} dependencies do not match route claims"

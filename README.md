@@ -20,11 +20,27 @@ The goal is not to replace a fleet management system with a lifelong MAPF
 solver. The goal is to show how MAPF can be introduced as a focused recovery
 mechanism without discarding an existing task, routing, and traffic stack.
 
+This is an independent clean-room reference implementation, not a module-by-
+module port or functional reimplementation of an earlier FMS. It distills
+general fleet-management lessons into a small public architecture using this
+repository's specifications, public literature, synthetic parameters, and
+properly licensed dependencies.
+
 ## Project status
 
-MAPF Splice is currently in the v0.1 design phase. The first release will be a
-clean, deterministic reference implementation centered on a polished warehouse
-demo and an accompanying technical article.
+MAPF Splice is currently building the v0.1 executable vertical slice. The
+foundation currently includes:
+
+- schema and cross-file validation for the compact hero scenario;
+- deterministic single-agent A* and executable hero-route expectations;
+- typed robots, tasks, versioned plans, move/wait actions, and resources;
+- MAPF solution validation and ADG compilation;
+- a static scenario-review renderer.
+
+Traffic admission, deadlock confirmation, recovery orchestration, atomic group
+plan replacement, dependency-aware execution, event traces, metrics, and the
+final animation are not implemented yet. The checked-in image is a design-time
+scenario review, not evidence from a completed simulation.
 
 The canonical design documents are:
 

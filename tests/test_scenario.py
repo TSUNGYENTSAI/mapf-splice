@@ -1,9 +1,11 @@
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import jsonschema
+import pytest
 
-from mapf_splice.scenario import load_review, load_scenario
+from mapf_splice.scenario import ScenarioError, load_review, load_scenario
 
 ROOT = Path(__file__).parents[1]
 SCENARIO_PATH = ROOT / "scenarios/compact-three-robot/scenario.json"
@@ -47,3 +49,58 @@ def test_review_views_derive_three_robot_prospective_sccs() -> None:
             for edge in view["prospective_dependencies"]
         }
         assert {("R1", "R2"), ("R2", "R3"), ("R3", "R1")} <= edges
+
+
+def test_review_rejects_duplicate_robot_routes(tmp_path: Path) -> None:
+    scenario = load_scenario(SCENARIO_PATH)
+    review = json.loads(REVIEW_PATH.read_text())
+    review["routes"].append(deepcopy(review["routes"][0]))
+    path = tmp_path / "duplicate-route.json"
+    path.write_text(json.dumps(review))
+
+    with pytest.raises(ScenarioError, match="duplicate review route"):
+        load_review(path, scenario)
+
+
+def test_review_route_must_equal_runtime_astar_route(tmp_path: Path) -> None:
+    scenario = load_scenario(SCENARIO_PATH)
+    review = json.loads(REVIEW_PATH.read_text())
+    alternative = (
+        (14, 10),
+        (13, 10),
+        (12, 10),
+        (11, 10),
+        (10, 10),
+        (10, 9),
+        (10, 8),
+        (10, 7),
+        (9, 7),
+        (8, 7),
+        (7, 7),
+        (7, 6),
+        (7, 5),
+        (7, 4),
+        (7, 3),
+        (7, 2),
+    )
+    review["routes"][2]["cells"] = [
+        {"row": row, "col": col} for row, col in alternative
+    ]
+    path = tmp_path / "alternative-shortest-route.json"
+    path.write_text(json.dumps(review))
+
+    with pytest.raises(ScenarioError, match=r"does not match deterministic A\*"):
+        load_review(path, scenario)
+
+
+def test_bootstrap_tasks_cannot_share_a_pickup_station(tmp_path: Path) -> None:
+    data = json.loads(SCENARIO_PATH.read_text())
+    data["map"]["path"] = str(SCENARIO_PATH.parent / "map.txt")
+    duplicate_pickup = deepcopy(data["task_stream"]["initial_tasks"][0])
+    duplicate_pickup["id"] = "T4"
+    data["task_stream"]["initial_tasks"].append(duplicate_pickup)
+    path = tmp_path / "duplicate-pickup.json"
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ScenarioError, match="cannot share a pickup"):
+        load_scenario(path)

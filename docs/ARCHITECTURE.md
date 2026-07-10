@@ -52,11 +52,29 @@ Owns stable vocabulary and state transitions:
 
 - `Robot`: current position or in-progress move, nominal motion state, payload
   state, active task, and plan version.
-- `Task`: pickup, drop-off, assignee, and current phase.
+- `Task`: pickup, drop-off, assignee, and the observable phase sequence
+  `pending -> assigned -> to-pickup -> carrying -> to-drop-off -> completed`.
+  Assignment and pickup transitions are preserved even when a robot begins on
+  the pickup cell.
 - `Action`: movement or wait, resource claims, dependencies, version, and
   lifecycle state.
 - `Plan`: an ordered, versioned set of actions for one robot.
 - `Reservation`: resource owner and release condition.
+
+Action identity is deterministic and plan-local: `(robot_id, plan_version,
+action_index)`. A robot increments its plan version whenever a validated plan
+is installed, including normal task-phase changes. A failed planning attempt
+does not consume a version.
+
+The only v0.1 action kinds are `move` and finite `wait`. There is no indefinite
+stay action and no blocked action. A completed plan leaves the robot's current
+occupancy authoritative. Seeded execution delay extends the progress of the
+currently running action and is not inserted into the plan as another action.
+
+During a multi-tick move, the robot's authoritative position remains the source
+cell until completion. The source occupancy is retained, while the undirected
+edge and target vertex remain committed. Completion atomically transfers
+occupancy to the target.
 
 The domain package must not import a solver, renderer, database, or wall clock.
 
@@ -83,13 +101,20 @@ state separate:
   be replaced by trace-derived frames once the simulator exists.
 
 Cross-file validation checks map symbols, station references, unique initial
-occupancy, route adjacency, committed-claim exclusivity, and whether declared
-preview dependencies match the route claims.
+occupancy, exact parity between review routes and deterministic A*, route
+adjacency, vertex/edge committed-claim exclusivity, and whether declared
+preview dependencies match occupied or committed resources. Review data is
+temporary executable scenario design input; it must not be treated as runtime
+evidence or extended into a second traffic implementation.
 
 ### Routing
 
 Provides a single-agent A* implementation or adapter for normal routing. It
 returns spatial paths and does not own traffic reservations or execution state.
+It considers static traversability only, uses Manhattan distance, returns paths
+including both start and goal, and returns a typed no-path result on failure.
+Equal-cost choices use the fixed neighbor priority south, west, east, then
+north so seeded scenarios remain reproducible.
 
 ### Traffic
 
@@ -162,6 +187,14 @@ Coordinates the transition from normal traffic to scoped MAPF recovery:
 11. Increment plan versions and replace remaining plans atomically.
 12. Return the robots to normal admission and execution.
 
+Plan splice is a group transaction, not a loop of single-robot installs. Before
+any mutation, recovery stages the complete affected set, expected current plan
+versions, validated replacement plans, future reservations to release, and
+occupancies that must be preserved. It then validates every version, plan
+start, ADG, and reservation change before committing the whole set as one state
+transition. Failure leaves every robot, version, occupancy, and reservation
+unchanged; a failed candidate consumes no plan version.
+
 ### MAPF adapter
 
 Defines a narrow solver boundary. Solver-specific configuration, timeouts, and
@@ -174,9 +207,19 @@ solver result.
 The compiler converts a synchronized MAPF solution into actions with:
 
 - sequential dependencies within each robot plan;
-- cross-robot precedence for shared resources;
+- cross-robot precedence between ordered visits to a shared vertex: the later
+  entry depends on the earlier occupant's departure;
 - explicit vertex and edge claims;
 - cycle validation and rejection of unsupported execution patterns.
+
+The MAPF adapter contract is a set of synchronized position sequences with
+stay-at-goal semantics. Before compilation, the solution is rejected if an
+action moves more than one grid edge, configurations contain a vertex
+collision, transitions contain an opposite-edge swap, or paths have unequal
+synchronized lengths. Repeated cells compile to finite wait actions. Trailing
+goal waits may be removed after validation because terminal occupancy remains
+authoritative. The compiler rejects an ADG cycle rather than attempting to
+execute a synchronized rotation that cannot be serialized by these rules.
 
 The executor starts an action only when its plan version is current, all
 dependencies are complete, and its claims are valid. Actions may require
