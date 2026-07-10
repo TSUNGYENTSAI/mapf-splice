@@ -153,3 +153,21 @@ def test_confirmed_graph_allows_zero_version_idle_occupancy_blocker() -> None:
     edge = next(e for e in graph.edges if e.blocking_robot_id == "R2")
     assert edge.blocking_plan_version == 0
     assert edge.occupied_blocker is True
+
+
+def test_build_confirmed_wait_for_is_read_only() -> None:
+    # The confirm path only classifies and records: it never replaces a plan or
+    # mutates reservations (no MAPF, no plan replacement in v0.1).
+    world = _world(
+        {"R1": (Cell(0, 0), Cell(0, 1)), "R2": (Cell(0, 1), Cell(0, 0))},
+        admit=False,
+    )
+    versions_before = {rid: r.plan_version for rid, r in world.robots.items()}
+    committed_before = world.reservations.all_committed_actions()
+    plans_before = dict(world.plans)
+
+    build_confirmed_wait_for(world, (("R1", 1), ("R2", 1)), tick=1)
+
+    assert {rid: r.plan_version for rid, r in world.robots.items()} == versions_before
+    assert world.reservations.all_committed_actions() == committed_before
+    assert world.plans == plans_before
