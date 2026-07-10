@@ -198,3 +198,15 @@ def test_batch_arbitration_is_independent_of_request_order() -> None:
     assert forward[0]["R1"].accepted
     assert not forward[0]["R2"].accepted
     assert forward[1] == (ActionRef("R1", 1, 0),)
+
+
+def test_completed_plan_retirement_removes_lifelong_metadata() -> None:
+    plan = _plan((Cell(0, 0), Cell(0, 1)))
+    ledger = CommittedReservationLedger(horizon=1)
+    _initial(ledger, plan, occupied={Cell(0, 0): "R1"})
+    _complete(plan, 0)
+    ledger.release_completed(plan, 0)
+
+    ledger.retire_completed_plan(plan)
+
+    assert not ledger.plan_initialized(plan)

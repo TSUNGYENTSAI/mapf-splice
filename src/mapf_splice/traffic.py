@@ -260,6 +260,50 @@ class CommittedReservationLedger:
         self._commit(accepted)
         return decisions
 
+    def admit_batch(
+        self,
+        plans: Sequence[Plan],
+        *,
+        occupied: Mapping[Cell, str],
+    ) -> dict[str, AdmissionDecision]:
+        """Admit initial windows and rolling frontiers in one arbitration batch."""
+        by_robot: dict[str, Plan] = {}
+        requests: dict[str, tuple[Action, ...]] = {}
+        initialize: set[str] = set()
+        for plan in plans:
+            if plan.robot_id in by_robot:
+                raise TrafficError("admission batch contains duplicate robots")
+            by_robot[plan.robot_id] = plan
+            key = (plan.robot_id, plan.version)
+            if key in self._initialized_plans:
+                frontier = self._frontier_action(plan)
+                requests[plan.robot_id] = () if frontier is None else (frontier,)
+            else:
+                if self.committed_actions(*key):
+                    raise TrafficError("uninitialized plan already owns reservations")
+                requests[plan.robot_id] = plan.actions[: self.horizon]
+                initialize.add(plan.robot_id)
+
+        staged_owners = {
+            resource: set(owners)
+            for resource, owners in self._owners_by_resource.items()
+        }
+        decisions: dict[str, AdmissionDecision] = {}
+        accepted: list[Action] = []
+        for robot_id in sorted(by_robot):
+            actions = requests[robot_id]
+            decision = self._evaluate(actions, occupied, staged_owners)
+            decisions[robot_id] = decision
+            if decision.accepted:
+                self._stage(actions, staged_owners)
+                accepted.extend(actions)
+        self._commit(accepted)
+        for robot_id in initialize:
+            if decisions[robot_id].accepted:
+                plan = by_robot[robot_id]
+                self._initialized_plans.add((robot_id, plan.version))
+        return decisions
+
     def _release_action_unchecked(self, action_ref: ActionRef) -> None:
         resources = self._resources_by_action.pop(action_ref, set())
         for resource in resources:
@@ -279,6 +323,17 @@ class CommittedReservationLedger:
         for ref in refs:
             self._release_action_unchecked(ref)
         self._initialized_plans.discard(key)
+
+    def retire_completed_plan(self, plan: Plan) -> None:
+        if any(action.status is not ActionStatus.COMPLETED for action in plan.actions):
+            raise TrafficError("only a completed plan can be retired")
+        key = (plan.robot_id, plan.version)
+        if self.committed_actions(*key):
+            raise TrafficError("completed plan still owns reservations")
+        self._initialized_plans.discard(key)
+
+    def plan_initialized(self, plan: Plan) -> bool:
+        return (plan.robot_id, plan.version) in self._initialized_plans
 
     def committed_actions(
         self,

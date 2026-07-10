@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mapf_splice.domain import Cell, DomainError, Plan, Robot, Task, TaskStatus
+from mapf_splice.domain import (
+    Action,
+    ActionRef,
+    ActionStatus,
+    Cell,
+    DomainError,
+    Plan,
+    Robot,
+    Task,
+    TaskStatus,
+)
 from mapf_splice.traffic import CommittedReservationLedger
 
 
@@ -114,8 +124,57 @@ class WorldState:
             if plan.actions[action_ref.action_index].ref != action_ref:
                 raise WorldStateError("reservation action does not match current plan")
 
+        for robot in self.robots.values():
+            plan = self.plans.get(robot.id)
+            running = (
+                []
+                if plan is None
+                else [
+                    action
+                    for action in plan.actions
+                    if action.status is ActionStatus.RUNNING
+                ]
+            )
+            if robot.active_action_ref is None:
+                if running:
+                    raise WorldStateError("running action is not active on its robot")
+                continue
+            if len(running) != 1 or running[0].ref != robot.active_action_ref:
+                raise WorldStateError(
+                    "robot must have exactly one active running action"
+                )
+            action = running[0]
+            if not robot.owns_current_version(action.ref):
+                raise WorldStateError("active action belongs to a stale plan version")
+            if action.start != robot.position:
+                raise WorldStateError("active action does not start at robot position")
+            if any(
+                action.ref not in self.reservations.owners(resource)
+                for resource in action.claims
+            ):
+                raise WorldStateError(
+                    "active action does not own all required resources"
+                )
+            for dependency in action.dependencies:
+                dependency_action = self.action(dependency)
+                if dependency_action.status is not ActionStatus.COMPLETED:
+                    raise WorldStateError("active action has an unmet dependency")
+
     def occupied_cells(self) -> dict[Cell, str]:
         return {robot.position: robot.id for robot in self.robots.values()}
+
+    def action(self, action_ref: ActionRef) -> Action:
+        plan = self.plans.get(action_ref.robot_id)
+        if (
+            plan is None
+            or plan.version != action_ref.plan_version
+            or action_ref.action_index >= len(plan.actions)
+        ):
+            raise WorldStateError(f"unknown current action {action_ref}")
+        action = plan.actions[action_ref.action_index]
+        if action.ref != action_ref:
+            raise WorldStateError("action reference does not match current plan")
+        return action
 
     def assign_task(self, task_id: str, robot_id: str) -> None:
         self.validate()

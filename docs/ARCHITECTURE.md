@@ -177,6 +177,14 @@ Failed replenishment preserves the remaining committed suffix and retries the
 same frontier rather than skipping it. Plan replacement may release only
 planned actions and can never release a running edge or target claim.
 
+Preview analysis starts at the first action beyond the committed frontier and
+inspects at most `K` actions. It emits immutable evidence containing the waiting
+action and plan version, blocking robot and plan version, concrete resource,
+blocking committed action references, and whether current occupancy is also a
+blocker. A robot may have multiple evidence records and blockers. Preview
+claims never enter the ledger; preview-versus-preview overlap produces a
+separate contention diagnostic only.
+
 The initial generic stopping-distance model is:
 
 ```text
@@ -288,6 +296,34 @@ trace; the simulator does not deep-copy a world snapshot on every tick.
 An idle robot cannot retain a current plan, active action, payload, or committed
 reservation. These aggregate rules are validated before assignment so a failed
 dispatch choice cannot leave a one-sided task/robot mutation.
+
+The normal execution tick is fixed as:
+
+1. collect due completions;
+2. validate the entire completion batch from one snapshot;
+3. atomically apply position transfers and action completion;
+4. release completed reservations;
+5. advance task phases, dispatch, and install phase plans;
+6. collect initial and rolling admission requests;
+7. batch-admit them with explicit robot-ID arbitration;
+8. collect eligible starts from one snapshot;
+9. start every validated action;
+10. generate read-only preview evidence;
+11. append events in deterministic order;
+12. advance the tick.
+
+While a move runs, the robot position remains the action source and its edge
+and target claims stay committed. Completion alone transfers position to the
+target and clears the active action. A running action must belong to the current
+robot and plan version, be the only running action in that plan, start at the
+authoritative position, own all claims, and have completed dependencies.
+
+Injected delay is a pure function of the configured delay seed and
+`(robot_id, plan_version, action_index)`. It does not consume a shared random
+stream, so adding a robot or changing iteration order cannot alter an existing
+action's duration. The append-only trace assigns a global sequence and records
+tick, phase, event kind, relevant IDs, and stable details; visualization remains
+a consumer rather than a kernel observer.
 
 ## Core invariants
 

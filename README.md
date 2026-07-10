@@ -37,14 +37,15 @@ foundation currently includes:
 - authoritative world state, deterministic dispatch, and task-phase
   orchestration;
 - atomic committed-droplet admission with rolling release and replenishment;
+- deterministic phased normal execution with ActionRef-derived delays;
+- append-only event tracing and read-only prospective dependency evidence;
 - MAPF solution validation and ADG compilation;
 - a static scenario-review renderer.
 
-Preview analysis, deadlock confirmation, recovery orchestration, atomic group
-plan replacement, dependency-aware execution, the phased simulator, event
-traces, metrics, and the final animation are not implemented yet. The
-checked-in image is a design-time scenario review, not evidence from a
-completed simulation.
+Dependency history, SCC stability, containment, confirmed deadlock analysis,
+recovery orchestration, atomic group plan replacement, recovery ADG execution,
+metrics, and the final animation are not implemented yet. The checked-in image
+is a design-time scenario review, not evidence from a completed simulation.
 
 The canonical design documents are:
 
