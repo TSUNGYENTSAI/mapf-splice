@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from mapf_splice.adg import MapfSolutionError, compile_adg
 from mapf_splice.domain import Cell, DomainError, Plan
 from mapf_splice.scenario import WarehouseMap
+from mapf_splice.tasking import current_phase_goal
+from mapf_splice.world import WorldState
 
 DEFAULT_RECOVERY_SEED = 0
 DEFAULT_RECOVERY_MAX_TIMESTEP = 256
@@ -178,3 +181,118 @@ def validate_synchronized_solution(
                     raise RecoveryValidationError(
                         f"opposite-edge swap at transition {time_index}"
                     )
+
+
+def plan_recovery(
+    world: WorldState,
+    identity: tuple[tuple[str, int], ...],
+    warehouse_map: WarehouseMap,
+    *,
+    seed: int = DEFAULT_RECOVERY_SEED,
+    max_timestep: int = DEFAULT_RECOVERY_MAX_TIMESTEP,
+) -> RecoveryProposal | RecoveryPlanningFailure:
+    """Produce and validate a scoped MAPF recovery proposal (read-only).
+
+    Never mutates world state, never installs plans, and never changes plan
+    versions or reservations. Returns a validated, not-yet-installed
+    RecoveryProposal or a typed RecoveryPlanningFailure. The PyPIBT adapter is
+    imported lazily here to keep the module import cycle-free and NumPy-free.
+    """
+    from mapf_splice.mapf_pibt import solve
+
+    scope_ids = tuple(sorted(robot_id for robot_id, _ in identity))
+    expected_versions = {robot_id: version for robot_id, version in identity}
+
+    # v0.1 supported boundary: every scope member is current, and the scope is
+    # exactly the set of all currently active robots (no non-participant robot).
+    for robot_id, version in identity:
+        robot = world.robots.get(robot_id)
+        plan = world.plans.get(robot_id)
+        if (
+            robot is None
+            or robot.plan_version != version
+            or plan is None
+            or plan.version != version
+        ):
+            return RecoveryPlanningFailure(
+                RecoveryFailureReason.UNSUPPORTED_SCOPE,
+                f"{robot_id} is not a current planned scope member at v{version}",
+            )
+    active_ids = {
+        robot_id
+        for robot_id, robot in world.robots.items()
+        if robot.active_task_id is not None
+    }
+    if active_ids != set(scope_ids):
+        return RecoveryPlanningFailure(
+            RecoveryFailureReason.UNSUPPORTED_SCOPE,
+            f"scope {sorted(scope_ids)} != active robots {sorted(active_ids)}",
+        )
+
+    starts = {robot_id: world.robots[robot_id].position for robot_id in scope_ids}
+    goals: dict[str, Cell] = {}
+    for robot_id in scope_ids:
+        try:
+            goals[robot_id] = current_phase_goal(world, robot_id)
+        except DomainError as error:
+            return RecoveryPlanningFailure(
+                RecoveryFailureReason.INVALID_TASK_PHASE,
+                f"{robot_id}: {error}",
+            )
+    if len(set(goals.values())) != len(goals):
+        return RecoveryPlanningFailure(
+            RecoveryFailureReason.DUPLICATE_GOAL,
+            "participants share a current task-phase goal",
+        )
+
+    problem = ScopedMapfProblem(
+        robot_ids=scope_ids,
+        starts=starts,
+        goals=goals,
+        warehouse_map=warehouse_map,
+        max_timestep=max_timestep,
+        seed=seed,
+    )
+    solution = solve(problem)
+    if isinstance(solution, RecoveryPlanningFailure):
+        return solution
+
+    try:
+        validate_synchronized_solution(solution, problem=problem)
+    except RecoveryValidationError as error:
+        return RecoveryPlanningFailure(
+            RecoveryFailureReason.INVALID_SOLUTION, str(error)
+        )
+
+    task_ids = {
+        robot_id: world.robots[robot_id].active_task_id for robot_id in scope_ids
+    }
+    new_versions = {
+        robot_id: expected_versions[robot_id] + 1 for robot_id in scope_ids
+    }
+    try:
+        plans = compile_adg(
+            solution.paths,
+            plan_versions=new_versions,
+            task_ids=task_ids,
+        )
+    except MapfSolutionError as error:
+        return RecoveryPlanningFailure(
+            RecoveryFailureReason.ADG_REJECTED, str(error)
+        )
+
+    return RecoveryProposal(
+        identity=identity,
+        expected_plan_versions=expected_versions,
+        starts=starts,
+        goals=goals,
+        solution=solution,
+        plans=plans,
+        metadata=RecoverySolverMetadata(
+            solver="pibt",
+            seed=seed,
+            max_timestep=max_timestep,
+            makespan=solution.makespan,
+            source_commit=PYPIBT_SOURCE_COMMIT,
+        ),
+    )
