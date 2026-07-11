@@ -3,59 +3,63 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MAPF Splice — Runtime Inspector</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>MAPF Splice — Recovery Stories</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="capture.css">
+    <link rel="stylesheet" href="story-visuals.css">
   </head>
   <body>
-    <header class="toolbar">
-      <div class="brand"><span class="mark">MS</span><div><strong>MAPF Splice</strong><small>Runtime Inspector</small></div></div>
-      <div class="transport" aria-label="Playback controls">
-        <button id="prevTick" title="Previous tick (Shift + Left)">− Tick</button>
-        <button id="prev" title="Previous checkpoint (Left)">‹</button>
-        <button id="play" class="primary" title="Play or pause (Space)">Play</button>
-        <button id="next" title="Next checkpoint (Right)">›</button>
-        <button id="nextTick" title="Next tick (Shift + Right)">Tick +</button>
-      </div>
-      <div class="frame-readout"><span id="tickLabel">Tick 0</span><strong id="checkpointLabel">tick-start</strong></div>
-      <label class="speed">Speed <select id="speed"><option value="1200">0.5×</option><option value="650" selected>1×</option><option value="300">2×</option><option value="120">4×</option></select></label>
-    </header>
+    <main class="story-shell">
+      <header class="story-header">
+        <div class="story-heading">
+          <div class="story-meta"><span id="storyLabel">Story B</span><span id="caseLabel">—</span></div>
+          <h1 id="storyTitle">Local Recovery, Not Global Replanning</h1>
+          <p id="storyClaim">Only the affected robots enter recovery; normal work continues outside the scope.</p>
+        </div>
+        <div class="story-controls control">
+          <label>Story<select id="storySelect" aria-label="Story"></select></label>
+          <button id="previousStage" aria-label="Previous story frame">‹</button>
+          <button id="play" class="primary" aria-label="Play, pause, resume, or restart story playback">Play</button>
+          <button id="nextStage" aria-label="Next story frame">›</button>
+          <div class="tick"><strong id="tickLabel">T0</strong><span id="checkpointLabel">—</span></div>
+          <button id="openEvidence">Evidence</button>
+          <button id="toggleExport">Export view</button>
+        </div>
+      </header>
 
-    <main>
-      <section class="panel warehouse-panel">
-        <div class="panel-heading"><div><p class="eyebrow">Authoritative runtime state</p><h1>Warehouse</h1></div><div id="runMeta" class="run-meta"></div></div>
-        <div id="warehouse" class="warehouse" aria-label="Warehouse map"></div>
-        <div class="legend"><span><i class="dot committed"></i>Committed</span><span><i class="dot preview"></i>Preview</span><span><i class="dot dependency"></i>Dependency</span><span><i class="dot contained"></i>Contained</span></div>
+      <section class="story-stage">
+        <article class="physical-card">
+          <div class="view-heading"><div><span>Physical view</span><h2>Authoritative fleet state</h2></div><div id="mapLegend" class="map-legend"></div></div>
+          <div id="physicalMap" class="physical-map" aria-label="Robot map"></div>
+          <p id="physicalConclusion" class="physical-conclusion"></p>
+        </article>
+
+        <aside class="logical-rail">
+          <section class="logical-view">
+            <div class="view-heading"><div><span>Logical view</span><h2 id="logicalTitle">Affected scope</h2></div><span id="logicalState" class="state-chip"></span></div>
+            <div id="logicalVisual" class="logical-visual"></div>
+          </section>
+          <section class="explanation">
+            <span>Current explanation</span>
+            <p id="explanationText"></p>
+            <div id="minimalEvidence" class="minimal-evidence"></div>
+          </section>
+        </aside>
       </section>
 
-      <section class="panel plans-panel">
-        <div class="panel-heading compact"><div><p class="eyebrow">Execution authority</p><h2>Plans &amp; Dependencies</h2></div><span id="planCount" class="pill"></span></div>
-        <div id="plans" class="plans"></div>
-        <aside id="actionDetail" class="detail empty">Select an action to inspect its claims and dependencies.</aside>
-      </section>
-
-      <section class="panel graph-panel">
-        <div class="panel-heading compact"><div><p class="eyebrow">Prospective evidence</p><h2>Dependency graph</h2></div><span id="edgeCount" class="pill"></span></div>
-        <div id="graph" class="graph"></div>
-        <div id="sccs" class="sccs"></div>
-      </section>
-
-      <section class="panel graph-panel">
-        <div class="panel-heading compact"><div><p class="eyebrow">Authoritative confirmation</p><h2>Confirmed wait-for graph</h2></div><span id="confirmedMeta" class="pill"></span></div>
-        <div id="confirmedGraph" class="graph"></div>
-      </section>
-
-      <section class="panel graph-panel">
-        <div class="panel-heading compact"><div><p class="eyebrow">Scoped MAPF recovery proposal</p><h2>Recovery proposal</h2></div><span id="recoveryMeta" class="pill"></span></div>
-        <div id="recovery" class="graph"></div>
-      </section>
-
-      <section class="panel events-panel">
-        <div class="event-head"><div><p class="eyebrow">Trace, never state reconstruction</p><h2>Events</h2></div><div id="bookmarks" class="bookmarks"></div><label>Robot <select id="robotFilter"><option value="">All</option></select></label><label>Kind <select id="kindFilter"><option value="">All</option></select></label></div>
-        <div id="events" class="events"></div>
-      </section>
+      <footer class="lifecycle">
+        <div class="lifecycle-heading"><span>Lifecycle view</span><strong id="stageName">—</strong></div>
+        <div id="stages" class="stages"></div>
+        <input id="storySlider" class="control" type="range" min="0" value="0" aria-label="Story playback position">
+      </footer>
     </main>
 
-    <footer class="timeline"><input id="slider" type="range" min="0" value="0"><span id="frameLabel"></span></footer>
+    <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+    <aside id="evidenceDrawer" class="evidence-drawer" aria-label="Evidence" aria-hidden="true">
+      <header><div><span>Replay evidence</span><h2>Evidence</h2></div><button id="closeEvidence">Close</button></header>
+      <nav id="evidenceTabs" aria-label="Evidence sections"></nav>
+      <div id="evidenceContent" class="evidence-content"></div>
+    </aside>
     <script type="module" src="app.js"></script>
   </body>
 </html>
