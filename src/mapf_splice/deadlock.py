@@ -10,7 +10,7 @@ from mapf_splice.confirm import (
     build_confirmed_wait_for,
     cyclic_components,
 )
-from mapf_splice.domain import ActionStatus, Plan
+from mapf_splice.domain import ActionStatus, DomainError, Plan
 from mapf_splice.preview import PreviewAnalysis, ProspectiveDependency
 from mapf_splice.recovery import (
     RecoveryPlanningFailure,
@@ -140,8 +140,9 @@ class DeadlockController:
 
     v0.1 supports at most one active containment incident globally. While an
     incident is active, no second incident forms and no candidate accrues an
-    eligible stability count. Recovery-group expansion and multi-incident
-    orchestration are deliberately out of scope.
+    eligible stability count. Upstream blocked-closure scope expansion is
+    implemented; idle/external blocker recruitment, dynamic scope expansion after
+    containment, and multi-incident orchestration remain out of scope.
     """
 
     stable_scc_observation_threshold: int = 2
@@ -344,6 +345,10 @@ class DeadlockController:
         Only a confirmed-deadlock incident that has not yet attempted recovery
         records a result; further calls are ignored. This milestone attempts
         recovery once with no retry, cancellation, or multi-attempt history.
+
+        A proposal must cover the frozen affected scope exactly; a proposal
+        scoped only to the trigger core (or to stale plan versions) is rejected
+        so the recovery scope can never silently collapse back to the core.
         """
         active = self._active
         if (
@@ -353,6 +358,10 @@ class DeadlockController:
         ):
             return
         if isinstance(result, RecoveryProposal):
+            if result.scope_identity != active.scope_identity:
+                raise DomainError(
+                    "recovery proposal scope does not match active containment scope"
+                )
             active.recovery_proposal = result
             active.recovery_state = RecoveryState.PROPOSAL_READY
         else:

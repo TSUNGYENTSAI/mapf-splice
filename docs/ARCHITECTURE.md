@@ -271,7 +271,10 @@ an unsupported incident is held with its evidence but neither expanded nor
 automatically re-evaluated. Upstream blocked-closure scope expansion is
 implemented; dynamic expansion after containment starts, idle-blocker
 recruitment, external-blocker re-evaluation, and non-participant moving-robot
-isolation remain future work.
+isolation remain future work. Multiple simultaneous cyclic cores with
+overlapping or nested affected scopes are not jointly normalized into one
+incident: the single-active-incident controller selects the first group to reach
+the threshold.
 
 In the calibrated hero the confirmed cycle is the two-robot `R1 <-> R2`
 mutual-occupancy loop while the containment scope is all three robots; `R3` waits

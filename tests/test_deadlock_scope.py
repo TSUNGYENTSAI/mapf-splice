@@ -1,13 +1,29 @@
 """Cycle core vs affected scope: group derivation, stability, containment."""
+import pytest
+
 from mapf_splice.deadlock import (
     ConfirmationOutcome,
     ContainmentState,
     DeadlockController,
     ProspectiveDeadlockGroup,
 )
-from mapf_splice.domain import ActionRef, Cell, Robot, Task, TaskStatus, VertexResource
+from mapf_splice.domain import (
+    ActionRef,
+    Cell,
+    DomainError,
+    Robot,
+    Task,
+    TaskStatus,
+    VertexResource,
+)
 from mapf_splice.planning import compile_path
 from mapf_splice.preview import PreviewAnalysis, ProspectiveDependency
+from mapf_splice.recovery import (
+    RecoveryProposal,
+    RecoverySolverMetadata,
+    RecoveryState,
+    ScopedMapfSolution,
+)
 from mapf_splice.traffic import CommittedReservationLedger
 from mapf_splice.world import WorldState
 
@@ -180,3 +196,65 @@ def test_confirmation_scope_larger_than_confirmed_cycle() -> None:
     assert {member[0] for member in result.graph.scope} == {"R1", "R2", "R3"}
     assert result.graph.cyclic_sccs == (("R1", "R2"),)
     assert controller.containment.state is ContainmentState.CONFIRMED_DEADLOCK
+
+
+def _confirmed_scope3_controller() -> DeadlockController:
+    world = _installed_world(
+        {
+            "R1": (Cell(0, 0), Cell(0, 1)),
+            "R2": (Cell(0, 1), Cell(0, 0)),
+            "R3": (Cell(1, 0), Cell(0, 0)),
+        }
+    )
+    controller = _contained_over_blocked(world)
+    controller.newly_quiescent(world)
+    result = controller.confirm(world, tick=18)
+    assert result.outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK
+    return controller
+
+
+def _recovery_proposal(scope: tuple[tuple[str, int], ...]) -> RecoveryProposal:
+    robot_ids = tuple(robot_id for robot_id, _ in scope)
+    solution = ScopedMapfSolution(
+        robot_ids=robot_ids,
+        paths={robot_id: (Cell(0, 0),) for robot_id in robot_ids},
+        makespan=0,
+    )
+    return RecoveryProposal(
+        scope_identity=scope,
+        expected_plan_versions={robot_id: version for robot_id, version in scope},
+        starts={robot_id: Cell(0, 0) for robot_id in robot_ids},
+        goals={robot_id: Cell(0, 0) for robot_id in robot_ids},
+        solution=solution,
+        plans={},
+        metadata=RecoverySolverMetadata(
+            solver="pibt", seed=0, max_timestep=1, makespan=0, source_commit="x"
+        ),
+    )
+
+
+# record_recovery must enforce that a proposal covers the active scope exactly.
+def test_record_recovery_rejects_proposal_scoped_to_core_only() -> None:
+    controller = _confirmed_scope3_controller()
+    proposal = _recovery_proposal((("R1", 1), ("R2", 1)))  # missing upstream R3
+    with pytest.raises(DomainError):
+        controller.record_recovery(proposal)
+    assert controller.containment.recovery_state is RecoveryState.NOT_ATTEMPTED
+    assert controller.containment.recovery_proposal is None
+
+
+def test_record_recovery_rejects_proposal_with_wrong_plan_versions() -> None:
+    controller = _confirmed_scope3_controller()
+    proposal = _recovery_proposal((("R1", 2), ("R2", 2), ("R3", 2)))  # wrong versions
+    with pytest.raises(DomainError):
+        controller.record_recovery(proposal)
+    assert controller.containment.recovery_state is RecoveryState.NOT_ATTEMPTED
+    assert controller.containment.recovery_proposal is None
+
+
+def test_record_recovery_accepts_proposal_matching_full_scope() -> None:
+    controller = _confirmed_scope3_controller()
+    proposal = _recovery_proposal((("R1", 1), ("R2", 1), ("R3", 1)))
+    controller.record_recovery(proposal)
+    assert controller.containment.recovery_state is RecoveryState.PROPOSAL_READY
+    assert controller.containment.recovery_proposal is proposal
