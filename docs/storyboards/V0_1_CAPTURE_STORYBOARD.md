@@ -139,8 +139,10 @@ interval leading to the anchor.
 - **Target duration:** 6–8 seconds
 - **Primary subject:** two action cards and their dependency; map shows motion.
 - **Required overlays:** R2 predecessor running with `+2` deterministic ticks;
-  R1 successor waiting; predecessor completion; successor starts at tick 36;
-  external waits = 0.
+  R1 successor waiting; predecessor completion; successor starts at tick 36. The
+  `external waits = 0` claim is not an inline story overlay; it stays in the
+  separate communication-proof evidence and is shown inline only when an
+  identified analyzer artifact is explicitly loaded with provenance.
 - **Required text:** `R1 waits for R2 · dependency satisfied · R1 starts`.
 - **Hide:** SCC panels, unrelated actions, complete ADG, task metadata.
 - **Key frames:** Before `T33 after-action-start`; Transition `T35 tick-start`;

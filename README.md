@@ -36,8 +36,10 @@ properly licensed dependencies.
 
 ## Project status
 
-MAPF Splice is currently building the v0.1 executable vertical slice. The
-foundation currently includes:
+The non-UI v0.1 runtime and fixed-topology lifelong validation milestone are
+complete. The current phase is communication: select the clearest replay cases
+and turn the existing deterministic evidence into a concise README, short
+animation set, and technical article. The implemented core includes:
 
 - schema and cross-file validation for the compact hero scenario;
 - deterministic single-agent A* and executable hero-route expectations;
@@ -55,17 +57,20 @@ foundation currently includes:
 - deterministic, schema-versioned runtime replay artifacts and an offline Web
   Inspector that consumes full simulation snapshots;
 - MAPF solution validation and ADG compilation;
-- a scoped PyPIBT MAPF recovery **proposal** on a confirmed deadlock (validated
-  synchronized paths and compiled new-version ADG plans, produced read-only and
-  never installed);
+- scoped PyPIBT MAPF recovery proposals bound to immutable confirmed incidents;
+- revalidated all-or-nothing multi-robot plan splice with typed failures;
+- asynchronous recovery execution through an ADG bounded-prefix profile;
+- active non-participants continuing normal work through shared occupancy and
+  reservation authority;
+- seeded bounded lifelong task streams, sequential recovery incidents, typed
+  run termination, diagnostic summaries, and deterministic failure artifacts;
+- a multi-case offline Web Inspector for selecting reproducible K=3 replays;
 - a static scenario-topology renderer.
 
-Atomic group plan replacement, recovery ADG execution, metrics, and the final
-animation are not implemented yet. On a confirmed deadlock the runtime now
-produces and validates a scoped MAPF recovery proposal as read-only diagnostic
-state; it still never installs a plan, changes a plan version, or mutates
-reservations. The checked-in image shows scenario topology only; runtime
-evidence comes from generated replay artifacts.
+The remaining v0.1 work is visual and editorial. Runtime behavior changes are
+out of scope unless producing the communication artifacts reproduces a
+correctness defect in an existing contract. The checked-in image shows static
+topology only; runtime evidence comes from generated replay artifacts.
 
 Scoped recovery uses a vendored MIT subset of PIBT and requires NumPy, provided
 by the optional `recovery` extra (`pip install "mapf-splice[recovery]"`); the
@@ -93,13 +98,41 @@ uv run mapf-splice-run \
 uv run mapf-splice-inspect artifacts/hero-k3.run.json
 ```
 
-Use the **Stable SCC** bookmark to inspect the full `after-preview` snapshot,
-then step forward through containment drain and quiescence to the **Confirmed**
-and **Hard deadlock** bookmarks and the `after-confirmation` frame. The browser
-renders positions, plans, committed reservations, prospective dependencies, the
-confirmed wait-for graph, containment state, and trace events already computed by
-Python. It does not reconstruct state, run routing or traffic logic, or consume a
-parallel route fixture.
+Open **Detect, Contain, Then Confirm** and step through its named semantic
+stages to compare the prospective SCC with the authoritative confirmed
+wait-for cycle. The browser keeps physical fleet state, the current logical
+visual, and the recovery lifecycle visible together. Its Evidence drawer
+contains plans, reservations, transaction state, trace events, and the raw
+frame already computed by Python. It does not reconstruct state, run routing
+or traffic logic, or consume a parallel route fixture.
+
+To review the selected K=3 lifelong cases from one Web Inspector, run:
+
+```bash
+uv run mapf-splice-inspect \
+  --lifelong-cases validation/lifelong
+```
+
+The six-story menu selects the calibrated replay required by each claim. The
+light 16:9 surface follows the checked-in
+[v0.1 capture storyboard](docs/storyboards/V0_1_CAPTURE_STORYBOARD.md) and stays
+within a no-scroll viewport. The map always remains visible while the logical
+rail switches between SCC/scope graphs, an action graph, atomic splice cards,
+a local ADG handoff, and lifecycle milestones. Export view hides controls only;
+it does not change the content model or replay semantics.
+
+Before selecting media windows, generate a read-only communication-proof report
+from the same production replay path:
+
+```bash
+uv run mapf-splice-communication-proofs \
+  --config validation/lifelong/three-robot-delayed.json
+```
+
+The report identifies incident windows, local scope and non-participant
+evidence, plan versions around atomic splice, delayed cross-robot handoffs,
+external waits, replay hash, and repeated-recovery continuation. It does not
+make runtime decisions; the Inspector remains the final visual-review surface.
 
 The calibrated hero intentionally distinguishes an early two-robot cyclic
 observation from the first candidate that reaches the stability threshold:
@@ -132,13 +165,11 @@ Each `simulation-run.v0.2` replay contains deterministic full snapshots at
 `after-confirmation`. The JSON Schema is under `schemas/`; the inspector assets
 are packaged in the Python distribution and require no network access.
 
-Confirmed hard deadlock is a runtime state, rendered in the inspector's confirmed
-wait-for panel. On confirmation the runtime also produces a scoped MAPF recovery
-proposal, shown read-only in the **Recovery proposal** panel and reachable from
-the **Recovery** bookmark: participants, quiescent starts, task-phase goals, the
-PIBT solver result and makespan, and ADG-compilation status. Recovery ADG
-execution and atomic plan replacement are not yet represented; the proposal is
-retained as diagnostic state awaiting the next milestone.
+Confirmed hard deadlock is a runtime state rendered in the Inspector's
+confirmed wait-for panel. The **Recovery proposal** panel then shows scoped
+participants, quiescent starts, phase goals, solver output, ADG compilation,
+installed generations, bounded-prefix authority, external blocking evidence,
+and completed recovery lifecycle state.
 
 ## Render the scenario topology
 
