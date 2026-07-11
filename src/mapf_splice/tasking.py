@@ -15,6 +15,38 @@ from mapf_splice.planning import compile_path
 from mapf_splice.routing import NoPath, RoutePath, find_path
 from mapf_splice.world import WorldState, WorldStateError
 
+_PHASE_GOAL_STATUSES = {
+    TaskStatus.TO_PICKUP: "pickup",
+    TaskStatus.CARRYING: "dropoff",
+    TaskStatus.TO_DROPOFF: "dropoff",
+}
+
+
+def current_phase_goal(world: WorldState, robot_id: str) -> Cell:
+    """Return the goal cell of a robot's current task phase (read-only).
+
+    Pickup-phase (to-pickup) maps to the pickup cell; carrying and drop-off
+    phases map to the drop-off cell. Inactive, unassigned, completed, or
+    inconsistent states are rejected. This query never mutates task or robot
+    state; it derives everything from the authoritative world.
+    """
+    robot = world.robots.get(robot_id)
+    if robot is None:
+        raise DomainError(f"unknown robot {robot_id}")
+    if robot.active_task_id is None:
+        raise DomainError(f"robot {robot_id} has no active task-phase goal")
+    task = world.tasks.get(robot.active_task_id)
+    if task is None:
+        raise DomainError(f"robot {robot_id} references an unknown active task")
+    if task.assigned_robot_id != robot_id:
+        raise DomainError("task and robot assignment do not agree")
+    target = _PHASE_GOAL_STATUSES.get(task.status)
+    if target is None:
+        raise DomainError(
+            f"task status {task.status.value} has no current-phase goal"
+        )
+    return task.pickup if target == "pickup" else task.dropoff
+
 
 def _active_robot(world: WorldState, task: Task) -> Robot:
     robot_id = task.assigned_robot_id
