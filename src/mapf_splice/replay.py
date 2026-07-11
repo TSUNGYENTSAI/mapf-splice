@@ -51,7 +51,9 @@ def _ref(ref: ActionRef | None) -> dict[str, Any] | None:
     }
 
 
-def _resource(resource: Resource) -> dict[str, Any]:
+def _resource(resource: Resource | None) -> dict[str, Any] | None:
+    if resource is None:
+        return None
     if isinstance(resource, VertexResource):
         return {"type": "vertex", "cell": _cell(resource.cell)}
     assert isinstance(resource, EdgeResource)
@@ -108,7 +110,7 @@ def _confirmed_graph(containment) -> dict[str, Any]:
     }
 
 
-def _recovery(containment) -> dict[str, Any] | None:
+def _recovery(containment, active_robot_ids: tuple[str, ...]) -> dict[str, Any] | None:
     if containment is None or containment.recovery_state is RecoveryState.NOT_ATTEMPTED:
         return None
     proposal = containment.recovery_proposal
@@ -149,6 +151,16 @@ def _recovery(containment) -> dict[str, Any] | None:
                     "blocked_reason": (
                         robot.blocked_reason.value if robot.blocked_reason else None
                     ),
+                    "blocking_resource": _resource(robot.blocking_resource),
+                    "blockers": [
+                        {
+                            "resource": _resource(blocker.resource),
+                            "robot_id": blocker.robot_id,
+                            "action_ref": _ref(blocker.action_ref),
+                            "internal": blocker.internal,
+                        }
+                        for blocker in robot.blockers
+                    ],
                     "resulting_committed_prefix_length": (
                         robot.resulting_committed_prefix_length
                     ),
@@ -196,6 +208,9 @@ def _recovery(containment) -> dict[str, Any] | None:
             "installation_tick": containment.installation_tick,
             "completion_tick": containment.completion_tick,
             "participants": participants,
+            "active_nonparticipants": sorted(
+                set(active_robot_ids) - set(participants)
+            ),
             "starts": [
                 {"robot_id": r, "cell": _cell(proposal.starts[r])}
                 for r in participants
@@ -236,6 +251,10 @@ def _recovery(containment) -> dict[str, Any] | None:
         "installation_tick": containment.installation_tick,
         "completion_tick": containment.completion_tick,
         "participants": [robot_id for robot_id, _ in containment.scope_identity],
+        "active_nonparticipants": sorted(
+            set(active_robot_ids)
+            - {robot_id for robot_id, _ in containment.scope_identity}
+        ),
         "starts": [],
         "goals": [],
         "solver": None,
@@ -437,7 +456,16 @@ class FrameRecorder:
                     and containment.confirmed_graph is not None
                     else None
                 ),
-                "recovery": _recovery(containment),
+                "recovery": _recovery(
+                    containment,
+                    tuple(
+                        sorted(
+                            robot_id
+                            for robot_id, robot in world.robots.items()
+                            if robot.active_task_id is not None
+                        )
+                    ),
+                ),
                 "events": [_event(value) for value in events],
             }
         )

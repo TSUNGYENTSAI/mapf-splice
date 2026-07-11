@@ -87,6 +87,27 @@ class RecoveryAdmissionRequest:
     horizon: int
     tick: int
 
+    def __post_init__(self) -> None:
+        if self.participants != tuple(sorted(set(self.participants))):
+            raise TrafficError("recovery participants must be sorted and unique")
+        if self.installed_versions != tuple(sorted(set(self.installed_versions))):
+            raise TrafficError("installed recovery versions must be sorted and unique")
+        installed_robot_ids = tuple(robot_id for robot_id, _ in self.installed_versions)
+        if len(installed_robot_ids) != len(set(installed_robot_ids)):
+            raise TrafficError("installed recovery robot ids must be unique")
+        if installed_robot_ids != self.participants:
+            raise TrafficError("installed recovery robot ids must match participants")
+        if self.horizon < 1 or self.tick < 0:
+            raise TrafficError("recovery horizon must be positive and tick nonnegative")
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryBlocker:
+    resource: Resource | None
+    robot_id: str
+    action_ref: ActionRef | None
+    internal: bool
+
 
 @dataclass(frozen=True, slots=True)
 class RecoveryRobotAdmissionResult:
@@ -100,6 +121,8 @@ class RecoveryRobotAdmissionResult:
     granted_actions: tuple[ActionRef, ...]
     first_blocked_action: ActionRef | None
     blocked_reason: RecoveryBlockedReason | None
+    blocking_resource: Resource | None
+    blockers: tuple[RecoveryBlocker, ...]
     resulting_committed_prefix_length: int
 
 
@@ -115,6 +138,14 @@ class RecoveryAdmissionResult:
     @property
     def any_new_authority(self) -> bool:
         return bool(self.staged_grants)
+
+    @property
+    def has_external_block(self) -> bool:
+        return any(
+            blocker.internal is False
+            for robot in self.robots
+            for blocker in robot.blockers
+        )
 
 
 @dataclass(slots=True)
@@ -430,7 +461,14 @@ class CommittedReservationLedger:
                 RecoveryAdmissionFailureReason.RECOVERY_GENERATION_MISMATCH,
                 "recovery request horizon does not match ledger",
             )
-        by_robot = {plan.robot_id: plan for plan in plans}
+        by_robot: dict[str, Plan] = {}
+        for plan in plans:
+            if plan.robot_id in by_robot:
+                raise RecoveryAdmissionError(
+                    RecoveryAdmissionFailureReason.PARTICIPANT_COVERAGE_MISMATCH,
+                    f"duplicate recovery plan for {plan.robot_id}",
+                )
+            by_robot[plan.robot_id] = plan
         incident_participants = tuple(
             robot_id for robot_id, _ in request.incident_ref.scope_identity
         )
@@ -475,8 +513,20 @@ class CommittedReservationLedger:
                     RecoveryAdmissionFailureReason.STALE_PLAN_VERSION,
                     f"stale recovery plan version for {robot_id}",
                 )
-            completed = self._completed_prefix(plan)
-            committed = self.committed_actions(robot_id, plan.version)
+            try:
+                completed = self._completed_prefix(plan)
+            except TrafficError as error:
+                raise RecoveryAdmissionError(
+                    RecoveryAdmissionFailureReason.INVALID_CURRENT_FRONTIER,
+                    f"invalid completed recovery frontier for {robot_id}: {error}",
+                ) from error
+            try:
+                committed = self.committed_actions(robot_id, plan.version)
+            except TrafficError as error:
+                raise RecoveryAdmissionError(
+                    RecoveryAdmissionFailureReason.RESERVATION_STATE_MISMATCH,
+                    f"invalid recovery reservation state for {robot_id}: {error}",
+                ) from error
             indices = tuple(ref.action_index for ref in committed)
             if any(index < completed for index in indices) or (
                 indices
@@ -500,6 +550,8 @@ class CommittedReservationLedger:
                 "blocked": False,
                 "blocked_action": None,
                 "blocked_reason": None,
+                "blocking_resource": None,
+                "blockers": (),
             }
 
         evaluation_order: list[ActionRef] = []
@@ -523,16 +575,26 @@ class CommittedReservationLedger:
                 action = plan.actions[index]
                 evaluation_order.append(action.ref)
                 data["evaluated"].append(action.ref)
+                missing_dependency = next(
+                    (
+                        dependency
+                        for dependency in action.dependencies
+                        if dependency not in all_actions
+                    ),
+                    None,
+                )
+                if missing_dependency is not None:
+                    raise RecoveryAdmissionError(
+                        RecoveryAdmissionFailureReason.INVALID_RECOVERY_PLAN,
+                        "recovery dependency does not reference an installed "
+                        f"recovery action: {missing_dependency}",
+                    )
                 unmet_cross = next(
                     (
                         dependency
                         for dependency in action.dependencies
                         if dependency.robot_id != robot_id
-                        and (
-                            dependency not in all_actions
-                            or all_actions[dependency].status
-                            is not ActionStatus.COMPLETED
-                        )
+                        and all_actions[dependency].status is not ActionStatus.COMPLETED
                     ),
                     None,
                 )
@@ -541,6 +603,14 @@ class CommittedReservationLedger:
                     data["blocked_action"] = action.ref
                     data["blocked_reason"] = (
                         RecoveryBlockedReason.UNMET_CROSS_ROBOT_DEPENDENCY
+                    )
+                    data["blockers"] = (
+                        RecoveryBlocker(
+                            None,
+                            unmet_cross.robot_id,
+                            unmet_cross,
+                            unmet_cross.robot_id in request.participants,
+                        ),
                     )
                     continue
                 for dependency in action.dependencies:
@@ -557,6 +627,37 @@ class CommittedReservationLedger:
                 if conflicts:
                     data["blocked"] = True
                     data["blocked_action"] = action.ref
+                    first_conflict = conflicts[0]
+                    blockers: set[tuple[Resource, str, ActionRef | None]] = set()
+                    for conflict in conflicts:
+                        if conflict.occupied_by is not None:
+                            blockers.add(
+                                (conflict.resource, conflict.occupied_by, None)
+                            )
+                        blockers.update(
+                            (conflict.resource, owner.robot_id, owner)
+                            for owner in conflict.reserved_by
+                        )
+                    data["blocking_resource"] = first_conflict.resource
+                    data["blockers"] = tuple(
+                        RecoveryBlocker(
+                            resource,
+                            blocker_id,
+                            blocker_ref,
+                            blocker_id in request.participants,
+                        )
+                        for resource, blocker_id, blocker_ref in sorted(
+                            blockers,
+                            key=lambda item: (
+                                repr(item[0]),
+                                item[1],
+                                (-1, "") if item[2] is None else (
+                                    item[2].action_index,
+                                    repr(item[2]),
+                                ),
+                            ),
+                        )
+                    )
                     live_conflict = any(
                         conflict.reserved_by
                         and any(
@@ -578,7 +679,13 @@ class CommittedReservationLedger:
                 staged_refs.add(action.ref)
                 data["granted"].append(action.ref)
 
-        self._publish_recovery_grants(staged, staged_owners)
+        try:
+            self._publish_recovery_grants(staged, staged_owners)
+        except TrafficError as error:
+            raise RecoveryAdmissionError(
+                RecoveryAdmissionFailureReason.ATOMIC_PUBLICATION_FAILED,
+                str(error),
+            ) from error
         for robot_id in request.participants:
             if state[robot_id]["granted"]:
                 self._initialized_plans.add((robot_id, versions[robot_id]))
@@ -601,6 +708,8 @@ class CommittedReservationLedger:
                     granted,
                     data["blocked_action"],
                     data["blocked_reason"],
+                    data["blocking_resource"],
+                    tuple(data["blockers"]),
                     len(existing) + len(granted),
                 )
             )

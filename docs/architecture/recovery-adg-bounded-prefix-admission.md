@@ -110,8 +110,10 @@ States are `NOT_ATTEMPTED`, `PROPOSAL_READY`, `INSTALLED`, `EXECUTING`,
 `ADMISSION_STALLED`. Installation enters `INSTALLED`; it does not imply motion.
 The first actual recovery `ACTION_STARTED` enters `EXECUTING`. A zero-action
 group may complete from `INSTALLED`. Zero grants with unfinished plans and no
-running or committed authority enters terminal `ADMISSION_STALLED` with blocked
-frontier evidence and no automatic retry. Completion requires exact installed
+running or committed participant authority enters terminal `ADMISSION_STALLED`
+only when the remaining block is wholly internal. An authoritative occupancy or
+commitment owned by a non-participant is a retryable external wait. Completion
+requires exact installed
 generations, no in-flight authority, all actions completed, and goal positions.
 
 ## 14. Simulator tick order
@@ -156,7 +158,7 @@ stoppability assumption.
 
 This design excludes conditional future ownership/Option A, global normal
 partial prefixes, a separate executor, idle recruitment, evacuation goals,
-dynamic/nonparticipant scope changes, concurrent incidents, retry/fallback,
+dynamic scope changes, concurrent incidents, terminal-stall retry/fallback,
 distributed transactions, and physical braking implementation.
 
 ## 19. Implementation plan

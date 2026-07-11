@@ -142,6 +142,12 @@ traffic, or execution decisions.
 9. Resume continuous work and present final metrics. A later comparison cut may
    place the rule-based run beside the same scenario.
 
+During steps 6–8, unrelated active robots remain visible and continue ordinary
+traffic. They are absent from the scoped MAPF splice but still arbitrate all
+occupied and committed resources through the same global ledger; a temporary
+external conflict pauses and retries recovery without being presented as a
+terminal recovery failure.
+
 ## Technical article outline
 
 1. **The integration gap**

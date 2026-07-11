@@ -108,7 +108,7 @@ def test_plan_recovery_is_read_only() -> None:
     assert _snapshot(world) == before
 
 
-def test_active_robot_outside_scope_is_unsupported() -> None:
+def test_active_robot_outside_scope_is_not_a_mapf_participant() -> None:
     world = _dropoff_world(
         {
             "R1": (Cell(0, 0), Cell(0, 4)),
@@ -116,11 +116,27 @@ def test_active_robot_outside_scope_is_unsupported() -> None:
             "R3": (Cell(1, 0), Cell(1, 4)),
         }
     )
-    # scope omits the still-active R3
+    before_r3 = _snapshot(world)
+    identity = (("R1", 2), ("R2", 2))
+    result = build_recovery_proposal(world, _incident(identity), OPEN)
+    assert isinstance(result, RecoveryProposal)
+    assert tuple(result.plans) == ("R1", "R2")
+    assert result.solution.robot_ids == ("R1", "R2")
+    assert set(result.starts) == set(result.goals) == {"R1", "R2"}
+    assert set(result.expected_plan_versions) == {"R1", "R2"}
+    assert _snapshot(world) == before_r3
+
+
+def test_scope_member_with_remaining_progress_is_not_quiescent() -> None:
+    world = _dropoff_world(
+        {"R1": (Cell(0, 0), Cell(0, 4)), "R2": (Cell(2, 0), Cell(2, 4))}
+    )
+    world.robots["R1"].remaining_ticks = 1
     identity = (("R1", 2), ("R2", 2))
     result = build_recovery_proposal(world, _incident(identity), OPEN)
     assert isinstance(result, RecoveryPlanningFailure)
     assert result.reason is RecoveryFailureReason.UNSUPPORTED_SCOPE
+    assert "not quiescent" in result.detail
 
 
 def test_shared_phase_goal_is_duplicate_goal() -> None:

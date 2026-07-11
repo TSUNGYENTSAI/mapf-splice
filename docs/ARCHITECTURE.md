@@ -269,9 +269,10 @@ containment scope is an unsupported external dependency. v0.1 is a deliberately
 limited reference mode: at most one active containment incident exists globally,
 an unsupported incident is held with its evidence but neither expanded nor
 automatically re-evaluated. Upstream blocked-closure scope expansion is
-implemented; dynamic expansion after containment starts, idle-blocker
-recruitment, external-blocker re-evaluation, and non-participant moving-robot
-isolation remain future work. Multiple simultaneous cyclic cores with
+implemented; dynamic expansion after containment starts and idle-blocker
+recruitment remain future work. Active robots outside the frozen scope continue
+normal admission and execution while sharing authoritative occupancy and the
+global reservation ledger with recovery. Multiple simultaneous cyclic cores with
 overlapping or nested affected scopes are not jointly normalized into one
 incident: the single-active-incident controller selects the first group to reach
 the threshold.
@@ -329,6 +330,20 @@ It then validates every version, plan
 start, ADG, and reservation change before committing the whole set as one state
 transition. Failure leaves every robot, version, occupancy, and reservation
 unchanged; a failed candidate consumes no plan version.
+
+The affected scope is exactly the solver and replacement participant set, even
+when other robots have active tasks. Those non-participants keep their current
+plans and versions and continue `NORMAL_K_CRUISE`. A scoped recovery may wait on
+their occupied or committed resources through the shared ledger; such external
+blocking is retried and is not terminal admission stall. Terminal
+`ADMISSION_STALLED` requires structural internal zero-progress with no running
+or committed participant authority. The focused contract is
+`docs/architecture/local-scoped-recovery-with-active-nonparticipants.md`.
+Normal admission runs before recovery admission on each phased tick. This gives
+active non-participants admission-order priority and preserves safety, but v0.1
+does not guarantee that recovery avoids long-term starvation under continuously
+replenished normal traffic. The single-active-incident policy also does not
+create a second incident if new mutual blocking arises during active recovery.
 
 ### MAPF adapter
 
@@ -460,6 +475,17 @@ The first implementation must encode and test at least these invariants:
 8. A preview claim never owns a resource and cannot displace a committed claim.
 
 ## Architectural boundary
+
+Bounded lifelong validation attaches the scenario-owned seeded task generator
+to this same simulator; it is not a second dispatch or execution authority.
+Generation stops at an explicit release tick and the existing phased runtime
+drains released work under an absolute bound. A project-owned typed result
+distinguishes clean drain, safe bounded horizon, no progress, typed recovery
+failure, known unsupported boundaries, invariant failure, and unexpected
+exceptions. `WorldState.validate()` remains authoritative; the validation
+runner only adds aggregate lifecycle and recovery-scope checks. The completed
+contract and checked-in corpus are documented in
+`docs/architecture/deterministic-lifelong-validation.md`.
 
 MAPF Splice demonstrates an integration pattern, not a deployable fleet manager.
 Future adapters may connect the kernel to real systems, but v0.1 deliberately

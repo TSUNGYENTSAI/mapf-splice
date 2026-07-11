@@ -1,0 +1,14 @@
+{
+  "scenario_path": "../../scenarios/compact-three-robot/scenario.json",
+  "workload_seed": 12,
+  "committed_horizon": 3,
+  "release_until_tick": 35,
+  "max_drain_ticks": 100,
+  "no_progress_threshold": 80,
+  "delay_seed": 7719,
+  "delay_probability": 0.0,
+  "delay_minimum_extra_ticks": 1,
+  "delay_maximum_extra_ticks": 3,
+  "recovery_max_timestep": 1,
+  "expect_drain": false
+}

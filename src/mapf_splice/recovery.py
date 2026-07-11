@@ -432,8 +432,8 @@ def build_recovery_proposal(
     scope_ids = tuple(sorted(robot_id for robot_id, _ in scope_identity))
     expected_versions = {robot_id: version for robot_id, version in scope_identity}
 
-    # v0.1 supported boundary: every scope member is current, and the scope is
-    # exactly the set of all currently active robots (no non-participant robot).
+    # The confirmed incident owns the frozen participant set. Validate those
+    # members only; unrelated active robots are intentionally absent from MAPF.
     for robot_id, version in scope_identity:
         robot = world.robots.get(robot_id)
         plan = world.plans.get(robot_id)
@@ -442,21 +442,23 @@ def build_recovery_proposal(
             or robot.plan_version != version
             or plan is None
             or plan.version != version
+            or robot.active_task_id is None
+            or plan.task_id != robot.active_task_id
         ):
             return RecoveryPlanningFailure(
                 RecoveryFailureReason.UNSUPPORTED_SCOPE,
                 f"{robot_id} is not a current planned scope member at v{version}",
             )
-    active_ids = {
-        robot_id
-        for robot_id, robot in world.robots.items()
-        if robot.active_task_id is not None
-    }
-    if active_ids != set(scope_ids):
-        return RecoveryPlanningFailure(
-            RecoveryFailureReason.UNSUPPORTED_SCOPE,
-            f"scope {sorted(scope_ids)} != active robots {sorted(active_ids)}",
-        )
+        if (
+            robot.active_action_ref is not None
+            or robot.remaining_ticks != 0
+            or any(action.status is ActionStatus.RUNNING for action in plan.actions)
+            or world.reservations.committed_actions(robot_id, version)
+        ):
+            return RecoveryPlanningFailure(
+                RecoveryFailureReason.UNSUPPORTED_SCOPE,
+                f"{robot_id} is not quiescent at v{version}",
+            )
 
     starts = {robot_id: world.robots[robot_id].position for robot_id in scope_ids}
     goals: dict[str, Cell] = {}

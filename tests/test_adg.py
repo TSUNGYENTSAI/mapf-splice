@@ -24,10 +24,26 @@ def test_adg_orders_later_vertex_entries_after_departures() -> None:
         for action in plan.actions
     )
     assert plans["R2"].actions[0].dependencies == (ActionRef("R1", 4, 0),)
-    assert set(plans["R2"].actions[1].dependencies) == {
+    assert plans["R2"].actions[1].dependencies == (
         ActionRef("R1", 4, 1),
         ActionRef("R2", 7, 0),
-    }
+    )
+
+
+def test_every_later_action_keeps_its_natural_predecessor() -> None:
+    plans = compile_adg(
+        {
+            "R1": (Cell(0, 0), Cell(0, 1), Cell(0, 2), Cell(0, 3)),
+            "R2": (Cell(1, 0), Cell(0, 0), Cell(0, 1), Cell(0, 2)),
+        },
+        plan_versions={"R1": 2, "R2": 5},
+        task_ids={"R1": "T1", "R2": "T2"},
+    )
+    for plan in plans.values():
+        for index, action in enumerate(plan.actions[1:], start=1):
+            predecessor = ActionRef(plan.robot_id, plan.version, index - 1)
+            assert predecessor in action.dependencies
+            assert action.dependencies == tuple(sorted(set(action.dependencies)))
 
 
 def test_adg_rejects_opposite_edge_swap() -> None:

@@ -25,6 +25,7 @@ class TickPhase(IntEnum):
 
 
 class EventKind(StrEnum):
+    TASK_RELEASED = "task-released"
     ACTION_COMPLETED = "action-completed"
     RESERVATION_RELEASED = "reservation-released"
     TASK_ASSIGNED = "task-assigned"
@@ -54,6 +55,7 @@ class EventKind(StrEnum):
     RECOVERY_PREFIX_GRANTED = "recovery-prefix-granted"
     RECOVERY_ADMISSION_FAILED = "recovery-admission-failed"
     RECOVERY_ADMISSION_STALLED = "recovery-admission-stalled"
+    RECOVERY_ADMISSION_EXTERNAL_WAIT = "recovery-admission-external-wait"
     RECOVERY_COMPLETED = "recovery-completed"
     TICK_ADVANCED = "tick-advanced"
 

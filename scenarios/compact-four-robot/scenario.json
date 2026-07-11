@@ -1,0 +1,70 @@
+{
+  "$schema": "../../schemas/scenario.v0.1.schema.json",
+  "schema_version": "scenario.v0.1",
+  "id": "compact-four-robot",
+  "seed": 20260711,
+  "map": {
+    "path": "map.txt",
+    "coordinate_system": "row_col",
+    "cell_size_m": 1.0
+  },
+  "stations": [
+    {"id": "P1", "kind": "handoff", "cell": {"row": 0, "col": 4}},
+    {"id": "P2", "kind": "handoff", "cell": {"row": 0, "col": 16}},
+    {"id": "P3", "kind": "handoff", "cell": {"row": 14, "col": 10}},
+    {"id": "P4", "kind": "handoff", "cell": {"row": 16, "col": 0}},
+    {"id": "D1", "kind": "delivery", "cell": {"row": 2, "col": 10}},
+    {"id": "D2", "kind": "delivery", "cell": {"row": 7, "col": 2}},
+    {"id": "D3", "kind": "delivery", "cell": {"row": 7, "col": 18}},
+    {"id": "D4", "kind": "delivery", "cell": {"row": 12, "col": 4}},
+    {"id": "D5", "kind": "delivery", "cell": {"row": 12, "col": 16}},
+    {"id": "D6", "kind": "delivery", "cell": {"row": 16, "col": 20}}
+  ],
+  "traffic": {
+    "committed_horizon": {"default": 3, "minimum": 3, "maximum": 5},
+    "preview_horizon": {"mode": "match_committed"}
+  },
+  "execution": {
+    "tick_duration_seconds": 1.0,
+    "base_move_duration_ticks": 1,
+    "delay_schedule": {
+      "type": "seeded_extra_wait",
+      "seed": 3107,
+      "probability": 0.0,
+      "extra_wait_ticks": {"minimum": 1, "maximum": 2}
+    }
+  },
+  "deadlock_analysis": {"stable_scc_observation_threshold": 2},
+  "fleet": {
+    "robots": [
+      {"id": "R1", "start_station_id": "P1", "initial_payload": "empty"},
+      {"id": "R2", "start_station_id": "P2", "initial_payload": "empty"},
+      {"id": "R3", "start_station_id": "P3", "initial_payload": "empty"},
+      {"id": "R4", "start_station_id": "P4", "initial_payload": "empty"}
+    ]
+  },
+  "dispatcher": {
+    "policy": "nearest_idle",
+    "task_order": "release_tick_then_task_id",
+    "tie_breaker": "robot_id"
+  },
+  "task_stream": {
+    "mode": "lifelong",
+    "initial_tasks": [
+      {"id": "T1", "release_tick": 5, "pickup_station_id": "P1", "delivery_station_id": "D5"},
+      {"id": "T2", "release_tick": 0, "pickup_station_id": "P2", "delivery_station_id": "D4"},
+      {"id": "T3", "release_tick": 12, "pickup_station_id": "P3", "delivery_station_id": "D2"},
+      {"id": "T4", "release_tick": 0, "pickup_station_id": "P4", "delivery_station_id": "D6"}
+    ],
+    "generator": {
+      "type": "seeded_station_pairs",
+      "seed": 9103,
+      "release_interval_ticks": {"minimum": 8, "maximum": 12},
+      "max_pending_tasks": 6,
+      "pickup_station_ids": ["P1", "P2", "P3"],
+      "delivery_station_ids": ["D1", "D2", "D3", "D4", "D5"],
+      "prevent_immediate_pair_repeat": true
+    },
+    "evaluation": {"stop_after_ticks": 600}
+  }
+}

@@ -8,7 +8,7 @@ const esc = value => String(value ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp
 const refLabel = ref => ref?.label ?? '—';
 const cellLabel = c => c ? `${c.row},${c.col}` : '—';
 const cellKey = c => `${c.row}:${c.col}`;
-const resourceLabel = r => r.type === 'vertex' ? `V(${cellLabel(r.cell)})` : `E(${cellLabel(r.first)}→${cellLabel(r.second)})`;
+const resourceLabel = r => !r ? 'dependency' : r.type === 'vertex' ? `V(${cellLabel(r.cell)})` : `E(${cellLabel(r.first)}→${cellLabel(r.second)})`;
 
 const allEvents = frames.flatMap((frame, frameIndex) => frame.events.map(event => ({...event, frameIndex})));
 const bookmarkDefs = [
@@ -93,8 +93,8 @@ function renderRecovery(frame){
   $('recoveryMeta').textContent=`${esc(s.solver)} · makespan ${s.makespan}`;
   const rows=r.participants.map(id=>{const path=r.paths.find(p=>p.robot_id===id);return `<div class="scc"><strong style="color:${robotColor(id)}">${esc(id)}</strong>${cellLabel(starts[id])} → ${cellLabel(goals[id])} · ${path.cells.length-1} steps</div>`}).join('');
   const versions=(r.installed_plan_versions||[]).map(x=>`${x.robot_id}: v${r.expected_plan_versions.find(y=>y.robot_id===x.robot_id)?.plan_version} → v${x.plan_version}`).join(' · ');
-  const admission=r.admission?`<div class="scc"><strong>Authority · ${esc(r.admission.profile)}</strong>K=${r.admission.horizon} · grants ${r.admission.staged_grants.map(x=>esc(x.label)).join(', ')||'none'}<br>${r.admission.robots.map(x=>`${esc(x.robot_id)}: +${x.granted_actions.length}${x.blocked_reason?` · ${esc(x.blocked_reason)}`:''}`).join(' · ')}</div>`:'';
-  $('recovery').innerHTML=`<div class="scc"><strong>${esc(r.state)}</strong>seed ${s.seed} · max_t ${s.max_timestep} · makespan ${s.makespan} · ADG ${r.adg_compiled?'compiled':'—'}<br>${esc(versions||'replacement not installed')}</div>${admission}${rows}`;
+  const admission=r.admission?`<div class="scc"><strong>Authority · ${esc(r.admission.profile)}</strong>K=${r.admission.horizon} · grants ${r.admission.staged_grants.map(x=>esc(x.label)).join(', ')||'none'}<br>${r.admission.robots.map(x=>`${esc(x.robot_id)}: +${x.granted_actions.length}${x.blocked_reason?` · ${esc(x.blocked_reason)}`:''}${x.blockers.length?` · blocked by ${x.blockers.map(b=>`${esc(b.robot_id)} @ ${esc(resourceLabel(b.resource))} (${b.internal?'internal':'external'})`).join(', ')}`:''}`).join(' · ')}</div>`:'';
+  $('recovery').innerHTML=`<div class="scc"><strong>${esc(r.state)}</strong>seed ${s.seed} · max_t ${s.max_timestep} · makespan ${s.makespan} · ADG ${r.adg_compiled?'compiled':'—'}<br>${esc(versions||'replacement not installed')}<br>Active non-participants: ${esc(r.active_nonparticipants.join(', ')||'none')}</div>${admission}${rows}`;
 }
 function renderEvents(frame){const robot=$('robotFilter').value,kind=$('kindFilter').value,events=frame.events.filter(e=>(!robot||e.robot_id===robot)&&(!kind||e.kind===kind));$('events').innerHTML=events.map(e=>`<div class="event"><span class="seq">#${e.sequence}</span><span class="phase">${esc(e.phase)}</span><span class="kind">${esc(e.kind)}</span><span>${esc(e.robot_id||'global')} ${esc(e.action_ref?.label||'')} ${esc(JSON.stringify(e.details))}</span></div>`).join('')||'<div class="event empty">No matching events at this checkpoint.</div>';}
 

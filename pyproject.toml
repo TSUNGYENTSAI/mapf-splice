@@ -25,6 +25,7 @@ recovery = [
 mapf-splice-render = "mapf_splice.render:main"
 mapf-splice-run = "mapf_splice.run:main"
 mapf-splice-inspect = "mapf_splice.inspect:main"
+mapf-splice-lifelong = "mapf_splice.lifelong_run:main"
 
 [dependency-groups]
 dev = [

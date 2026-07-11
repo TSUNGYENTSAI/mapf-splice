@@ -15,6 +15,7 @@ from mapf_splice.domain import Action, ActionStatus, Cell, TaskStatus
 from mapf_splice.planning import next_required_action
 from mapf_splice.preview import PreviewAnalysis, analyze_preview, resource_label
 from mapf_splice.recovery import (
+    DEFAULT_RECOVERY_MAX_TIMESTEP,
     ConfirmedRecoveryIncident,
     RecoveryIncidentRef,
     RecoveryInstallFailure,
@@ -40,6 +41,7 @@ from mapf_splice.traffic import (
     RecoveryAdmissionRequest,
     TrafficError,
 )
+from mapf_splice.workload import SeededTaskStream
 from mapf_splice.world import WorldState, WorldStateError
 
 
@@ -53,6 +55,8 @@ class DeterministicSimulator:
     deadlock_controller: DeadlockController = field(default_factory=DeadlockController)
     recorder: FrameRecorder | None = None
     warehouse_map: WarehouseMap | None = None
+    task_stream: SeededTaskStream | None = None
+    recovery_max_timestep: int = DEFAULT_RECOVERY_MAX_TIMESTEP
 
     def __post_init__(self) -> None:
         if self.base_action_duration_ticks < 1:
@@ -413,7 +417,7 @@ class DeterministicSimulator:
             return
         except TrafficError as error:
             failure = RecoveryAdmissionFailure(
-                RecoveryAdmissionFailureReason.ATOMIC_PUBLICATION_FAILED,
+                RecoveryAdmissionFailureReason.RESERVATION_STATE_MISMATCH,
                 str(error),
                 self.world.tick,
             )
@@ -456,6 +460,21 @@ class DeterministicSimulator:
                         ),
                     ),
                 )
+        if result.has_external_block:
+            blockers = sorted(
+                {
+                    blocker.robot_id
+                    for robot in result.robots
+                    for blocker in robot.blockers
+                    if not blocker.internal
+                }
+            )
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.APPLY_ADMISSION,
+                kind=EventKind.RECOVERY_ADMISSION_EXTERNAL_WAIT,
+                details=(("blocking_robots", ",".join(blockers)),),
+            )
         running = any(
             self.world.robots[robot_id].active_action_ref is not None
             for robot_id in participants
@@ -475,6 +494,7 @@ class DeterministicSimulator:
             and not result.any_new_authority
             and not running
             and not committed
+            and not result.has_external_block
         ):
             self.deadlock_controller.stall_recovery_admission()
             self.trace.append(
@@ -622,6 +642,18 @@ class DeterministicSimulator:
         )
 
     def tick(self) -> None:
+        if self.task_stream is not None:
+            for task in self.task_stream.release_due(self.world):
+                self.trace.append(
+                    tick=self.world.tick,
+                    phase=TickPhase.ADVANCE_TASKS,
+                    kind=EventKind.TASK_RELEASED,
+                    task_id=task.id,
+                    details=(
+                        ("pickup_station_id", task.pickup_station_id),
+                        ("delivery_station_id", task.delivery_station_id),
+                    ),
+                )
         self._record("tick-start")
         due = self._complete_due_actions()
         self._record("after-completions")
@@ -715,7 +747,12 @@ class DeterministicSimulator:
             ),
             result.graph,
         )
-        outcome = build_recovery_proposal(self.world, incident, self.warehouse_map)
+        outcome = build_recovery_proposal(
+            self.world,
+            incident,
+            self.warehouse_map,
+            max_timestep=self.recovery_max_timestep,
+        )
         self.deadlock_controller.record_recovery(outcome)
         members = self._identity_label(result.scope_identity)
         if isinstance(outcome, RecoveryProposal):
