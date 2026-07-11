@@ -47,13 +47,21 @@ foundation currently includes:
 - deterministic, schema-versioned runtime replay artifacts and an offline Web
   Inspector that consumes full simulation snapshots;
 - MAPF solution validation and ADG compilation;
+- a scoped PyPIBT MAPF recovery **proposal** on a confirmed deadlock (validated
+  synchronized paths and compiled new-version ADG plans, produced read-only and
+  never installed);
 - a static scenario-topology renderer.
 
-Recovery orchestration, atomic group plan replacement, recovery ADG execution,
-metrics, and the final animation are not implemented yet. Confirmation is
-classify-and-record only: it never calls MAPF or mutates a plan. The checked-in
-image shows scenario topology only; runtime evidence comes from generated replay
-artifacts.
+Atomic group plan replacement, recovery ADG execution, metrics, and the final
+animation are not implemented yet. On a confirmed deadlock the runtime now
+produces and validates a scoped MAPF recovery proposal as read-only diagnostic
+state; it still never installs a plan, changes a plan version, or mutates
+reservations. The checked-in image shows scenario topology only; runtime
+evidence comes from generated replay artifacts.
+
+Scoped recovery uses a vendored MIT subset of PIBT and requires NumPy, provided
+by the optional `recovery` extra (`pip install "mapf-splice[recovery]"`); the
+`uv sync` development environment already includes it.
 
 The canonical design documents are:
 
@@ -117,9 +125,12 @@ Each `simulation-run.v0.2` replay contains deterministic full snapshots at
 are packaged in the Python distribution and require no network access.
 
 Confirmed hard deadlock is a runtime state, rendered in the inspector's confirmed
-wait-for panel. MAPF recovery and recovery ADG execution are not yet represented
-as runtime states; a confirmed or unsupported incident simply holds its
-containment awaiting the future scoped-MAPF milestone.
+wait-for panel. On confirmation the runtime also produces a scoped MAPF recovery
+proposal, shown read-only in the **Recovery proposal** panel and reachable from
+the **Recovery** bookmark: participants, quiescent starts, task-phase goals, the
+PIBT solver result and makespan, and ADG-compilation status. Recovery ADG
+execution and atomic plan replacement are not yet represented; the proposal is
+retained as diagnostic state awaiting the next milestone.
 
 ## Render the scenario topology
 
@@ -137,5 +148,7 @@ runtime screenshots, dependency graphs, containment, and future animation.
 
 ## License
 
-Apache License 2.0. Third-party components and assets will retain their original
-licenses and attribution.
+Apache License 2.0. Third-party components and assets retain their original
+licenses and attribution; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+The scoped-recovery solver is a vendored MIT subset of
+[pypibt](https://github.com/Kei18/pypibt) under `src/mapf_splice/_vendor/pypibt/`.

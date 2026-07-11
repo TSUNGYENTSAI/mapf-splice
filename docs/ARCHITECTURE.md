@@ -295,6 +295,28 @@ third-party data structures remain behind the adapter. The domain receives a
 validated solution or a typed failure; it never receives a partially trusted
 solver result.
 
+The first v0.1 adapter is PIBT. A minimal, unmodified MIT subset of
+[pypibt](https://github.com/Kei18/pypibt) is vendored under
+`src/mapf_splice/_vendor/pypibt/` at a pinned commit (see
+`THIRD_PARTY_NOTICES.md` and the vendored `PROVENANCE.md`); vendoring avoids
+pulling upstream's notebook/development dependencies into the runtime, so the
+only added requirement is NumPy behind the optional `recovery` extra. The
+`mapf_pibt` adapter is the sole module that touches PyPIBT or NumPy: it sorts
+participants deterministically, converts project `Cell(row, col)` to PIBT
+`(y, x)`, builds the boolean traversability grid, runs the solver with a fixed
+seed (default 0) and a bounded max timestep, and independently verifies every
+goal is reached before returning project-owned types. A timeout or goals-not-
+reached result is `solver-did-not-find-supported-solution`; it does not prove
+the instance is unsatisfiable, and no fallback solver is attempted.
+
+Scoped recovery is staged read-only. In this milestone `recovery.plan_recovery`
+produces and validates a `RecoveryProposal` — the confirmed containment scope as
+the agent set (the cyclic core only triggers recovery), authoritative quiescent
+starts, current task-phase goals, PIBT paths re-checked by a solver-independent
+validator, and new-version ADG plans compiled through `compile_adg`. It never
+installs plans, changes versions, or mutates reservations; atomic versioned plan
+replacement is the next milestone.
+
 ### ADG compiler and executor
 
 The compiler converts a synchronized MAPF solution into actions with:
