@@ -201,9 +201,10 @@ curve or parameter is used.
 Deadlock analysis has two deliberately separate stages:
 
 1. Build `robot -> set[blocking_robot]` prospective dependencies when preview
-   actions encounter occupied or committed resources. A stable SCC is a cyclic
-   risk, not yet a hard deadlock.
-2. Contain the affected group, let already authorized actions reach quiescence,
+   actions encounter occupied or committed resources. A stable cyclic SCC is a
+   cyclic risk, not yet a hard deadlock. The SCC is the trigger core; its
+   upstream blocked closure is the affected scope that must be contained.
+2. Contain the affected scope, let already authorized actions reach quiescence,
    and recompute the required motion-authority claims. The condition becomes a
    hard reservation deadlock only if the circular wait persists and no member
    has committed progress capable of releasing the blocking resource.
@@ -216,23 +217,34 @@ changes.
 The graph algorithm is replaceable. Tarjan's algorithm is an implementation
 choice, not a product feature.
 
-One stability observation occurs per preview phase. Candidate identity is the
-sorted set of `(robot_id, current_plan_version)` members in a maximal cyclic
-SCC; changing concrete resources or action references does not change identity.
-The default policy threshold is two consecutive observations and is scenario
-configurable with a minimum of one. Disappearance, membership change, or a plan
-version change resets the old candidate. Action completion does not reset it
-directly: the next preview graph determines whether the same candidate remains.
+A candidate has two explicit, plan-version-scoped identities. The **cyclic
+trigger core** is the sorted `(robot_id, current_plan_version)` membership of a
+maximal cyclic SCC (size >= 2). The **affected scope** is the core's upstream
+blocked closure: because a prospective edge means "waiting robot -> blocking
+robot", the scope is every robot with a directed path into the core, found by
+reverse-traversing `blocker -> waiters`. Robots that wait *into* the cycle are
+not part of the SCC but must be contained with it, so the scope is a superset of
+the core. Changing concrete resources or action references changes neither.
 
-When a candidate first reaches the threshold, containment records exactly its
-plan-version-scoped SCC core. Beginning with the next tick, contained plans no
-longer request replenishment. Running and already committed actions still start,
-finish, and release normally. Containment does not modify position, task, plan,
-or reservation state and does not invoke MAPF.
+One stability observation occurs per preview phase. The default policy threshold
+is two consecutive observations and is scenario configurable with a minimum of
+one. A change in membership or plan version of **either** the trigger core or the
+affected scope resets the old candidate; disappearance also resets it. Action
+completion does not reset it directly: the next preview graph determines whether
+the same candidate remains.
 
-A containment is quiescent only when every scoped plan version is still current
-and has no active action, running action, or committed reservation. Remaining
-planned actions are preserved. Quiescence is emitted once.
+When a candidate first reaches the threshold, containment freezes the trigger
+core that caused the incident and the complete affected scope computed from that
+observation, and preserves the core separately for diagnostics. Beginning with
+the next tick, every plan in the affected scope stops requesting replenishment;
+an upstream blocked robot is contained, not left in normal rolling admission.
+Running and already committed actions still start, finish, and release normally.
+Containment does not modify position, task, plan, or reservation state and does
+not invoke MAPF.
+
+A containment is quiescent only when **every scope member's** plan version is
+still current and has no active action, running action, or committed reservation.
+Remaining planned actions are preserved. Quiescence is emitted once.
 
 #### Confirmed wait-for graph (v0.1 single-incident reference mode)
 
@@ -240,22 +252,26 @@ A stable prospective SCC is only a cyclic *risk*. Once a containment is
 quiescent, confirmation rebuilds an authoritative wait-for graph and decides, one
 time, whether that risk is a real reservation deadlock. The two graphs are
 deliberately distinct: the prospective graph looks ahead over the preview horizon
-during normal traffic, while the confirmed graph is built after quiescence from
-each member's first unfinished action using the same committed-reservation
-conflict semantics as admission. The confirmed graph is facts-only evidence —
-waiting action, required resource, committed and occupied blockers, in-scope
-versus external blocker, deterministic directed edges, and cyclic SCCs — and
-carries no classification field.
+during normal traffic, while the confirmed graph is built after quiescence over
+the **full affected scope** from each scope member's first unfinished action,
+using the same committed-reservation conflict semantics as admission. The
+confirmed graph is facts-only evidence — waiting action, required resource,
+committed and occupied blockers, in-scope versus external blocker, deterministic
+directed edges, and cyclic SCCs — and carries no classification field. The
+confirmed cyclic SCC may be smaller than the containment scope: an upstream
+blocked scope member need not belong to the confirmed cycle.
 
-Classification is separate policy. An internal cycle is a confirmed hard
-deadlock. An acyclic, fully in-scope graph is a cleared false positive: the
-incident is released and normal admission resumes on the next tick. A blocker
-outside the containment scope is an unsupported external dependency. v0.1 is a
-deliberately limited reference mode: at most one active containment incident
-exists globally, an unsupported incident is held with its evidence but neither
-expanded nor automatically re-evaluated, and confirmation never calls MAPF or
-mutates a plan. Recovery-group expansion, external re-evaluation, and scoped MAPF
-recovery are future work.
+Classification is separate policy. An internal cycle *anywhere inside the frozen
+scope* is a confirmed hard deadlock; every scope member need not be in that
+cycle. An acyclic, fully in-scope graph is a cleared false positive: the incident
+is released and normal admission resumes on the next tick. A blocker outside the
+containment scope is an unsupported external dependency. v0.1 is a deliberately
+limited reference mode: at most one active containment incident exists globally,
+an unsupported incident is held with its evidence but neither expanded nor
+automatically re-evaluated. Upstream blocked-closure scope expansion is
+implemented; dynamic expansion after containment starts, idle-blocker
+recruitment, external-blocker re-evaluation, and non-participant moving-robot
+isolation remain future work.
 
 In the calibrated hero the confirmed cycle is the two-robot `R1 <-> R2`
 mutual-occupancy loop while the containment scope is all three robots; `R3` waits
