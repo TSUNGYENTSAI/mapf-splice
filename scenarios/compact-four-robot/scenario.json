@@ -12,13 +12,13 @@
     {"id": "P1", "kind": "handoff", "cell": {"row": 0, "col": 4}},
     {"id": "P2", "kind": "handoff", "cell": {"row": 0, "col": 16}},
     {"id": "P3", "kind": "handoff", "cell": {"row": 14, "col": 10}},
-    {"id": "P4", "kind": "handoff", "cell": {"row": 16, "col": 0}},
+    {"id": "P4", "kind": "handoff", "cell": {"row": 14, "col": 4}},
     {"id": "D1", "kind": "delivery", "cell": {"row": 2, "col": 10}},
     {"id": "D2", "kind": "delivery", "cell": {"row": 7, "col": 2}},
     {"id": "D3", "kind": "delivery", "cell": {"row": 7, "col": 18}},
     {"id": "D4", "kind": "delivery", "cell": {"row": 12, "col": 4}},
     {"id": "D5", "kind": "delivery", "cell": {"row": 12, "col": 16}},
-    {"id": "D6", "kind": "delivery", "cell": {"row": 16, "col": 20}}
+    {"id": "D6", "kind": "delivery", "cell": {"row": 14, "col": 16}}
   ],
   "traffic": {
     "committed_horizon": {"default": 3, "minimum": 3, "maximum": 5},
@@ -61,8 +61,8 @@
       "seed": 9103,
       "release_interval_ticks": {"minimum": 8, "maximum": 12},
       "max_pending_tasks": 6,
-      "pickup_station_ids": ["P1", "P2", "P3"],
-      "delivery_station_ids": ["D1", "D2", "D3", "D4", "D5"],
+      "pickup_station_ids": ["P1", "P2", "P3", "P4"],
+      "delivery_station_ids": ["D1", "D2", "D3", "D4", "D5", "D6"],
       "prevent_immediate_pair_repeat": true
     },
     "evaluation": {"stop_after_ticks": 600}

@@ -47,6 +47,46 @@ def test_seeded_task_generation_is_repeatable_valid_and_ordered() -> None:
     assert all(task.pickup_station_id != task.delivery_station_id for task in first)
 
 
+def test_random_initial_tasks_are_seeded_unique_and_simultaneous() -> None:
+    scenario = load_scenario(ROOT / "scenarios/compact-four-robot/scenario.json")
+    first_world = build_initial_world(scenario)
+    first_stream = SeededTaskStream(scenario, 1043, 100, True)
+    first = first_stream.prepare_initial_tasks(first_world)
+    second_world = build_initial_world(scenario)
+    second_stream = SeededTaskStream(scenario, 1043, 100, True)
+    second = second_stream.prepare_initial_tasks(second_world)
+    assert first == second
+    assert len(first) == len(first_world.robots) == 4
+    assert {task.release_tick for task in first} == {0}
+    assert len({task.pickup_station_id for task in first}) == 4
+
+
+@pytest.mark.parametrize(
+    "name,recoveries,final_tick",
+    [
+        ("random-k3-flow-seed590.json", 0, 127),
+        ("random-k3-one-recovery-seed202.json", 1, 134),
+        ("random-k3-two-recoveries-seed615.json", 2, 148),
+        ("random-k3-three-recoveries-seed213.json", 3, 123),
+        ("random-k3-four-recoveries-seed1043.json", 4, 128),
+    ],
+)
+def test_random_review_cases_give_every_robot_three_tasks_and_drain(
+    name: str, recoveries: int, final_tick: int
+) -> None:
+    result = run_lifelong_validation(_config(name))
+    assert result.summary["termination_reason"] == "completed-and-drained"
+    assert result.summary["committed_horizon"] == 3
+    assert result.summary["final_tick"] == final_tick
+    assert min(result.summary["tasks_completed_by_robot"].values()) >= 3
+    assert result.summary["recoveries_completed"] == recoveries
+    assert any(
+        robot["robot_id"] == "R4" and robot["position"]["row"] < 14
+        for frame in result.replay["frames"]
+        for robot in frame["robots"]
+    )
+
+
 def test_invalid_workload_and_watchdog_configuration_are_rejected() -> None:
     scenario = load_scenario(ROOT / "scenarios/compact-three-robot/scenario.json")
     with pytest.raises(WorkloadError):

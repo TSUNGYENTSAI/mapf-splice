@@ -26,6 +26,7 @@ class SeededTaskStream:
     scenario: ScenarioBundle
     seed: int
     release_until_tick: int
+    randomize_initial_tasks: bool = False
     _generator: dict = field(init=False, repr=False)
     _rng: random.Random = field(init=False, repr=False)
     _next_release_tick: int = field(init=False, repr=False)
@@ -55,6 +56,54 @@ class SeededTaskStream:
         self._next_index = 1
         self._last_pair: tuple[str, str] | None = None
         self._released: list[GeneratedTask] = []
+
+    def prepare_initial_tasks(self, world: WorldState) -> tuple[GeneratedTask, ...]:
+        if not self.randomize_initial_tasks:
+            return ()
+        if world.tick != 0 or any(
+            task.status is not TaskStatus.PENDING for task in world.tasks.values()
+        ):
+            raise WorkloadError(
+                "random initial tasks require an untouched tick-0 world"
+            )
+        count = len(world.robots)
+        pickups = list(self._generator["pickup_station_ids"])
+        if len(pickups) < count:
+            raise WorkloadError("random initial tasks need one pickup per robot")
+        self._rng.shuffle(pickups)
+        world.tasks.clear()
+        generated = []
+        for index, pickup in enumerate(pickups[:count], start=1):
+            delivery_choices = [
+                delivery
+                for delivery in self._generator["delivery_station_ids"]
+                if self.scenario.stations[delivery] != self.scenario.stations[pickup]
+                and not isinstance(
+                    find_path(
+                        self.scenario.stations[pickup],
+                        self.scenario.stations[delivery],
+                        is_traversable=self.scenario.warehouse_map.is_traversable,
+                    ),
+                    NoPath,
+                )
+            ]
+            if not delivery_choices:
+                raise WorkloadError(f"pickup {pickup} has no reachable delivery")
+            delivery = delivery_choices[self._rng.randrange(len(delivery_choices))]
+            task = GeneratedTask(f"T{index}", 0, pickup, delivery)
+            world.tasks[task.id] = Task(
+                task.id,
+                self.scenario.stations[pickup],
+                self.scenario.stations[delivery],
+                0,
+            )
+            generated.append(task)
+            self._last_pair = (pickup, delivery)
+        minimum = self._generator["release_interval_ticks"]["minimum"]
+        maximum = self._generator["release_interval_ticks"]["maximum"]
+        self._next_release_tick = self._rng.randint(minimum, maximum)
+        world.validate()
+        return tuple(generated)
 
     @property
     def released(self) -> tuple[GeneratedTask, ...]:

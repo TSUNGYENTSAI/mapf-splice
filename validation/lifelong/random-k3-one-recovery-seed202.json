@@ -1,12 +1,13 @@
 {
   "scenario_path": "../../scenarios/compact-four-robot/scenario.json",
-  "workload_seed": 12,
+  "workload_seed": 202,
   "committed_horizon": 3,
-  "release_until_tick": 12,
-  "max_drain_ticks": 300,
-  "no_progress_threshold": 120,
+  "release_until_tick": 100,
+  "max_drain_ticks": 500,
+  "no_progress_threshold": 160,
   "delay_seed": 7719,
   "delay_probability": 0.0,
   "delay_minimum_extra_ticks": 1,
-  "delay_maximum_extra_ticks": 3
+  "delay_maximum_extra_ticks": 3,
+  "randomize_initial_tasks": true
 }

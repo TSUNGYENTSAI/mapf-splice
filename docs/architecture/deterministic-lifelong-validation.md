@@ -129,7 +129,7 @@ The checked-in corpus verified these outcomes:
 | three-robot K=4 | 71 | 5/5 | 2/2 | `COMPLETED_AND_DRAINED` |
 | three-robot K=5 | 72 | 5/5 | 2/2 | `COMPLETED_AND_DRAINED` |
 | deterministic delay | 122 | 5/5 | 2/2 | `COMPLETED_AND_DRAINED` |
-| four-robot non-participant | 71 | 6/6 | 2/2 | `COMPLETED_AND_DRAINED` |
+| four-robot non-participant | 35 | 4/4 | 1/1 | `COMPLETED_AND_DRAINED` |
 | solver max-timestep failure | 19 | 0/3 | 0/0 | `SAFE_RECOVERY_FAILURE` |
 
 Every row completed with zero aggregate invariant violations. Two independent

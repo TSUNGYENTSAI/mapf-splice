@@ -39,6 +39,7 @@ class LifelongRunConfig:
     delay_minimum_extra_ticks: int | None = None
     delay_maximum_extra_ticks: int | None = None
     recovery_max_timestep: int = 256
+    randomize_initial_tasks: bool = False
     expect_drain: bool = True
 
     def __post_init__(self) -> None:
@@ -280,6 +281,23 @@ def _summary(
     assigned = {
         event.task_id for event in events if event.kind is EventKind.TASK_ASSIGNED
     }
+    assigned_by_robot = {
+        robot_id: len(
+            {
+                event.task_id
+                for event in events
+                if event.kind is EventKind.TASK_ASSIGNED and event.robot_id == robot_id
+            }
+        )
+        for robot_id in sorted(simulator.world.robots)
+    }
+    completed_by_robot = {
+        robot_id: sum(
+            task.status is TaskStatus.COMPLETED and task.assigned_robot_id == robot_id
+            for task in simulator.world.tasks.values()
+        )
+        for robot_id in sorted(simulator.world.robots)
+    }
     return {
         "scenario_id": simulator.recorder.scenario.data["id"],
         "scenario_path": str(config.scenario_path),
@@ -298,10 +316,12 @@ def _summary(
             for task in simulator.world.tasks.values()
         ),
         "tasks_assigned": len(assigned),
+        "tasks_assigned_by_robot": assigned_by_robot,
         "tasks_completed": sum(
             task.status is TaskStatus.COMPLETED
             for task in simulator.world.tasks.values()
         ),
+        "tasks_completed_by_robot": completed_by_robot,
         "actions_started": count(EventKind.ACTION_STARTED),
         "actions_completed": count(EventKind.ACTION_COMPLETED),
         "stable_sccs_detected": count(EventKind.STABLE_SCC_DETECTED),
@@ -329,8 +349,12 @@ def run_lifelong_validation(config: LifelongRunConfig) -> LifelongRunResult:
     simulator.recorder = recorder
     simulator.recovery_max_timestep = config.recovery_max_timestep
     simulator.task_stream = SeededTaskStream(
-        scenario, config.workload_seed, config.release_until_tick
+        scenario,
+        config.workload_seed,
+        config.release_until_tick,
+        config.randomize_initial_tasks,
     )
+    simulator.task_stream.prepare_initial_tasks(simulator.world)
     delay = scenario.data["execution"]["delay_schedule"]
     simulator.delay_schedule = DeterministicDelaySchedule(
         seed=config.delay_seed if config.delay_seed is not None else delay["seed"],
