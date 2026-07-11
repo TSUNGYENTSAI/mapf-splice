@@ -11,6 +11,11 @@ from mapf_splice.confirm import (
 )
 from mapf_splice.domain import ActionStatus, Plan
 from mapf_splice.preview import PreviewAnalysis, ProspectiveDependency
+from mapf_splice.recovery import (
+    RecoveryPlanningFailure,
+    RecoveryProposal,
+    RecoveryState,
+)
 from mapf_splice.world import WorldState
 
 PlanMember = tuple[str, int]
@@ -58,6 +63,9 @@ class Containment:
     confirmation_tick: int | None = None
     outcome: ConfirmationOutcome | None = None
     confirmed_graph: ConfirmedWaitForGraph | None = None
+    recovery_state: RecoveryState = RecoveryState.NOT_ATTEMPTED
+    recovery_proposal: RecoveryProposal | None = None
+    recovery_failure: RecoveryPlanningFailure | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +96,9 @@ class ContainmentSnapshot:
     confirmation_tick: int | None
     outcome: ConfirmationOutcome | None
     confirmed_graph: ConfirmedWaitForGraph | None
+    recovery_state: RecoveryState
+    recovery_proposal: RecoveryProposal | None
+    recovery_failure: RecoveryPlanningFailure | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +159,9 @@ class DeadlockController:
                     confirmation_tick=active.confirmation_tick,
                     outcome=active.outcome,
                     confirmed_graph=active.confirmed_graph,
+                    recovery_state=active.recovery_state,
+                    recovery_proposal=active.recovery_proposal,
+                    recovery_failure=active.recovery_failure,
                 )
             ),
         )
@@ -268,6 +282,30 @@ class DeadlockController:
         else:  # CLEAR: false positive, release and resume admission next tick.
             self._release()
         return result
+
+    def record_recovery(
+        self,
+        result: RecoveryProposal | RecoveryPlanningFailure,
+    ) -> None:
+        """Attach a recovery proposal or typed failure to the incident once.
+
+        Only a confirmed-deadlock incident that has not yet attempted recovery
+        records a result; further calls are ignored. This milestone attempts
+        recovery once with no retry, cancellation, or multi-attempt history.
+        """
+        active = self._active
+        if (
+            active is None
+            or active.state is not ContainmentState.CONFIRMED_DEADLOCK
+            or active.recovery_state is not RecoveryState.NOT_ATTEMPTED
+        ):
+            return
+        if isinstance(result, RecoveryProposal):
+            active.recovery_proposal = result
+            active.recovery_state = RecoveryState.PROPOSAL_READY
+        else:
+            active.recovery_failure = result
+            active.recovery_state = RecoveryState.UNSUPPORTED_OR_FAILED
 
     def _release(self) -> None:
         self._active = None

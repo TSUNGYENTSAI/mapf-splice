@@ -14,9 +14,10 @@ from mapf_splice.dispatch import dispatch_pending_tasks
 from mapf_splice.domain import Action, ActionStatus, Cell, TaskStatus
 from mapf_splice.planning import next_required_action
 from mapf_splice.preview import PreviewAnalysis, analyze_preview, resource_label
+from mapf_splice.recovery import RecoveryProposal, RecoveryState, plan_recovery
 from mapf_splice.replay import FrameRecorder
 from mapf_splice.routing import NoPath
-from mapf_splice.scenario import ScenarioBundle, build_initial_world
+from mapf_splice.scenario import ScenarioBundle, WarehouseMap, build_initial_world
 from mapf_splice.tasking import (
     complete_dropoff,
     complete_pickup,
@@ -36,6 +37,7 @@ class DeterministicSimulator:
     trace: EventTrace = field(default_factory=EventTrace)
     deadlock_controller: DeadlockController = field(default_factory=DeadlockController)
     recorder: FrameRecorder | None = None
+    warehouse_map: WarehouseMap | None = None
 
     def __post_init__(self) -> None:
         if self.base_action_duration_ticks < 1:
@@ -68,6 +70,7 @@ class DeterministicSimulator:
                     "stable_scc_observation_threshold"
                 ]
             ),
+            warehouse_map=scenario.warehouse_map,
         )
 
     def _running_actions(self) -> tuple[tuple[str, Action], ...]:
@@ -498,6 +501,47 @@ class DeterministicSimulator:
             kind=self._OUTCOME_EVENTS[result.outcome],
             details=(("members", self._identity_label(result.identity)),),
         )
+        if result.outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK:
+            self._attempt_recovery(result.identity)
+
+    def _attempt_recovery(self, identity: CandidateIdentity) -> None:
+        """Produce a scoped recovery proposal once, as diagnostic state only.
+
+        Proposal-only: this never installs plans, changes versions, or mutates
+        reservations. A missing map or an already-attempted incident is skipped.
+        """
+        containment = self.deadlock_controller.containment
+        if (
+            self.warehouse_map is None
+            or containment is None
+            or containment.recovery_state is not RecoveryState.NOT_ATTEMPTED
+        ):
+            return
+        outcome = plan_recovery(self.world, identity, self.warehouse_map)
+        self.deadlock_controller.record_recovery(outcome)
+        members = self._identity_label(identity)
+        if isinstance(outcome, RecoveryProposal):
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.CONFIRM_DEADLOCK,
+                kind=EventKind.RECOVERY_PROPOSAL_READY,
+                details=(
+                    ("members", members),
+                    ("participants", len(outcome.plans)),
+                    ("makespan", outcome.solution.makespan),
+                    ("solver", outcome.metadata.solver),
+                ),
+            )
+        else:
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.CONFIRM_DEADLOCK,
+                kind=EventKind.RECOVERY_PLANNING_FAILED,
+                details=(
+                    ("members", members),
+                    ("reason", outcome.reason.value),
+                ),
+            )
 
     def _record(
         self,

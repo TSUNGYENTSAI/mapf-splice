@@ -44,6 +44,8 @@ class EventKind(StrEnum):
     CONFIRMATION_UNSUPPORTED = "confirmation-unsupported"
     CONTAINMENT_CLEARED = "containment-cleared"
     CONTAINMENT_INVALIDATED = "containment-invalidated"
+    RECOVERY_PROPOSAL_READY = "recovery-proposal-ready"
+    RECOVERY_PLANNING_FAILED = "recovery-planning-failed"
     TICK_ADVANCED = "tick-advanced"
 
 
