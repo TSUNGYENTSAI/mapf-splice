@@ -11,6 +11,14 @@ DEFAULT_RECOVERY_MAX_TIMESTEP = 256
 PYPIBT_SOURCE_COMMIT = "a3c97f60413c6619a29a5022969896bc54877edc"
 
 
+class RecoveryValidationError(ValueError):
+    """Raised when a synchronized recovery solution fails project validation.
+
+    Kept independent of ADG compilation so a later solver swap cannot bypass
+    these safety checks by producing output the ADG compiler happens to accept.
+    """
+
+
 class RecoveryFailureReason(StrEnum):
     UNSUPPORTED_SCOPE = "unsupported-scope"
     INVALID_TASK_PHASE = "invalid-task-phase"
@@ -99,3 +107,74 @@ class RecoveryProposal:
 class RecoveryPlanningFailure:
     reason: RecoveryFailureReason
     detail: str
+
+
+def validate_synchronized_solution(
+    solution: ScopedMapfSolution,
+    *,
+    problem: ScopedMapfProblem,
+) -> None:
+    """Validate a synchronized solution against its problem (solver-independent).
+
+    Raises RecoveryValidationError on the first violation. Checks exact
+    participant coverage and deterministic ordering, that starts equal the
+    authoritative quiescent positions and goals equal the current task-phase
+    goals, synchronized length, in-bounds traversable cells, adjacent-or-wait
+    transitions, no vertex collision, and no opposite-edge swap.
+    """
+    if solution.robot_ids != problem.robot_ids:
+        raise RecoveryValidationError(
+            f"solution coverage {solution.robot_ids} != scope {problem.robot_ids}"
+        )
+    if set(solution.paths) != set(problem.robot_ids):
+        raise RecoveryValidationError("solution path coverage does not match scope")
+
+    lengths = {len(path) for path in solution.paths.values()}
+    if len(lengths) != 1:
+        raise RecoveryValidationError("solution paths are not synchronized in length")
+    horizon = lengths.pop()
+    if horizon != solution.makespan + 1:
+        raise RecoveryValidationError("solution length does not match makespan")
+
+    warehouse = problem.warehouse_map
+    ids = problem.robot_ids
+    for robot_id in ids:
+        path = solution.paths[robot_id]
+        if path[0] != problem.starts[robot_id]:
+            raise RecoveryValidationError(
+                f"{robot_id} path start {path[0]} != authoritative position"
+            )
+        if path[-1] != problem.goals[robot_id]:
+            raise RecoveryValidationError(
+                f"{robot_id} path goal {path[-1]} != current task-phase goal"
+            )
+        for cell in path:
+            if not warehouse.is_traversable(cell):
+                raise RecoveryValidationError(
+                    f"{robot_id} path visits non-traversable cell {cell}"
+                )
+        for start, end in zip(path, path[1:], strict=False):
+            if start.manhattan_distance(end) not in (0, 1):
+                raise RecoveryValidationError(
+                    f"{robot_id} path has a non-adjacent transition {start}->{end}"
+                )
+
+    for time_index in range(horizon):
+        positions = [solution.paths[robot_id][time_index] for robot_id in ids]
+        if len(set(positions)) != len(positions):
+            raise RecoveryValidationError(
+                f"vertex collision at timestep {time_index}"
+            )
+
+    for time_index in range(horizon - 1):
+        for offset, first_id in enumerate(ids):
+            for second_id in ids[offset + 1 :]:
+                if (
+                    solution.paths[first_id][time_index]
+                    == solution.paths[second_id][time_index + 1]
+                    and solution.paths[first_id][time_index + 1]
+                    == solution.paths[second_id][time_index]
+                ):
+                    raise RecoveryValidationError(
+                        f"opposite-edge swap at transition {time_index}"
+                    )
