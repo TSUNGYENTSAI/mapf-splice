@@ -170,4 +170,21 @@ $('storySelect').onchange=event=>activateStory(event.target.value);$('previousSt
 addEventListener('keydown',event=>{if(['INPUT','SELECT'].includes(event.target.tagName))return;if(event.code==='Space'){event.preventDefault();togglePlay();}else if(event.key==='ArrowLeft')playbackController?.previous();else if(event.key==='ArrowRight')playbackController?.next();else if(event.key==='Escape')setDrawer(false);});
 
 window.__MAPF_SPLICE_STORY__={get storyId(){return activeStoryId;},get sequence(){return emittedSequence;},get state(){return playbackState();},activateStory};
+const captureItemMetadata = item => ({
+  kind:item.kind,
+  replayIndex:item.replayIndex,
+  sources:item.sourceFrames.map(frame=>({replayIndex:frame.replayIndex,tick:frame.tick,checkpoint:frame.checkpoint})),
+  presentation:structuredClone(item.presentation)
+});
+window.__MAPF_SPLICE_CAPTURE__=Object.freeze({
+  getStoryId:()=>activeStoryId,
+  getCursor:()=>playbackState()?.frameCursor ?? null,
+  getItemCount:()=>emittedSequence.length,
+  getItems:()=>emittedSequence.map(captureItemMetadata),
+  getCurrentItemMetadata:()=>currentItem()?captureItemMetadata(currentItem()):null,
+  activateStory,
+  seek:cursor=>playbackController?.seek(cursor),
+  restart:()=>playbackController?.restart(),
+  setExportView:enabled=>document.body.classList.toggle('export-view',Boolean(enabled))
+});
 await activateStory('B');
