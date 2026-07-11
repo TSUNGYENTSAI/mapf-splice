@@ -1,0 +1,317 @@
+{
+  "schema_version": "story-media-freeze.v1",
+  "source_commit": "c29354f5ae6d334e9d4c624a3627efb16a8e77a1",
+  "viewport": {
+    "width": 1440,
+    "height": 810,
+    "device_scale_factor": 1
+  },
+  "tool_versions": {
+    "node": "v24.14.0",
+    "playwright": "1.61.1",
+    "chromium": "Google Chrome (Playwright channel)",
+    "ffmpeg": "ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "stories": {
+    "A": {
+      "story_id": "A",
+      "case_id": "four-robot-nonparticipant",
+      "source_commit": "c29354f5ae6d334e9d4c624a3627efb16a8e77a1",
+      "replay_sha256": "90e510ad85dee503b1f70542d3331c0dd86bba90e30f8645021bdb2957754036",
+      "first_item": {
+        "kind": "explain",
+        "tick": 18,
+        "checkpoint": "after-confirmation",
+        "stage_id": "synchronized-paths"
+      },
+      "terminal_item": {
+        "kind": "explain",
+        "tick": 19,
+        "checkpoint": "after-action-start",
+        "stage_id": "running-context"
+      },
+      "tick_bounds": {
+        "first": 18,
+        "last": 19
+      },
+      "emitted_item_count": 7,
+      "runtime_item_count": 0,
+      "explain_item_count": 7,
+      "montage_gap_item_count": 0,
+      "montage_gap_count": 0,
+      "emitted_duration_ms": 5400,
+      "encoding_time_scale": 1.0,
+      "capture_duration_ms": 6400,
+      "terminal_loop_hold_ms": 1000,
+      "target_duration_ms": [
+        6000,
+        8000
+      ],
+      "poster_frame_cursor": 3,
+      "outputs": {
+        "poster": "poster.png",
+        "gif": "story-a.gif",
+        "webm": "story-a.webm",
+        "mp4": "story-a.mp4"
+      },
+      "output_sha256": {
+        "poster": "44acbbeae5334187ed71367856b6fa03200d66ca371c9c736502dacbb611e97b",
+        "gif": "6728eb2d5c7b2d003d2a723d72d4e5f12c7b463f957f7b0f654f8063ced4627e",
+        "webm": "dc57da5837063edfb8b85ec7bec51f154aac1ed8e4dd9e6df58d98971067526c",
+        "mp4": "8e47b8c8b151290b6912314e2b3eb77b257abe74b879503872d5485ba0be0d40"
+      },
+      "intentional_checkpoint_suppression": "production emitted sequence; no capture-side selection",
+      "capture_choreography": "export-view compact overview"
+    },
+    "B": {
+      "story_id": "B",
+      "case_id": "four-robot-nonparticipant",
+      "source_commit": "c29354f5ae6d334e9d4c624a3627efb16a8e77a1",
+      "replay_sha256": "90e510ad85dee503b1f70542d3331c0dd86bba90e30f8645021bdb2957754036",
+      "first_item": {
+        "kind": "runtime",
+        "tick": 12,
+        "checkpoint": "after-action-start",
+        "stage_id": "all-active"
+      },
+      "terminal_item": {
+        "kind": "runtime",
+        "tick": 34,
+        "checkpoint": "after-recovery-completion",
+        "stage_id": "recovery-complete"
+      },
+      "tick_bounds": {
+        "first": 12,
+        "last": 34
+      },
+      "emitted_item_count": 82,
+      "runtime_item_count": 82,
+      "explain_item_count": 0,
+      "montage_gap_item_count": 0,
+      "montage_gap_count": 0,
+      "emitted_duration_ms": 25200,
+      "encoding_time_scale": 1.0,
+      "capture_duration_ms": 26200,
+      "terminal_loop_hold_ms": 1000,
+      "target_duration_ms": [
+        20000,
+        30000
+      ],
+      "poster_frame_cursor": 12,
+      "outputs": {
+        "poster": "poster.png",
+        "gif": "story-b.gif",
+        "webm": "story-b.webm",
+        "mp4": "story-b.mp4"
+      },
+      "output_sha256": {
+        "poster": "17230f789a9dbcad05485036f936729d119e1d8b15dcfad95009636d4cd5c524",
+        "gif": "5e7f3415e5f6f3bb3a0c4205e2681a68da3bcc098749f304c8d3da3987cc55f4",
+        "webm": "9ef051b2ff9a71fc1603b62bb1013b02a73d1cd236320be8a4df865a2965ead1",
+        "mp4": "ff60bd0d8bceab7bee65e145d73bd49a97bafa05964a4379fcd43fd2630ca4a9"
+      },
+      "intentional_checkpoint_suppression": "production emitted sequence; no capture-side selection",
+      "capture_choreography": "exact emitted-item seeking"
+    },
+    "C": {
+      "story_id": "C",
+      "case_id": "three-robot-k3",
+      "source_commit": "c29354f5ae6d334e9d4c624a3627efb16a8e77a1",
+      "replay_sha256": "0a04b0fee02fd256ad94ad67d10111f46368f27d3ae616fcb27376931acff053",
+      "first_item": {
+        "kind": "runtime",
+        "tick": 14,
+        "checkpoint": "after-action-start",
+        "stage_id": "future-dependencies"
+      },
+      "terminal_item": {
+        "kind": "runtime",
+        "tick": 18,
+        "checkpoint": "after-confirmation",
+        "stage_id": "confirmed-cycle"
+      },
+      "tick_bounds": {
+        "first": 14,
+        "last": 18
+      },
+      "emitted_item_count": 15,
+      "runtime_item_count": 14,
+      "explain_item_count": 1,
+      "montage_gap_item_count": 0,
+      "montage_gap_count": 0,
+      "emitted_duration_ms": 6750,
+      "encoding_time_scale": 1.05,
+      "capture_duration_ms": 8088,
+      "terminal_loop_hold_ms": 1000,
+      "target_duration_ms": [
+        8000,
+        10000
+      ],
+      "poster_frame_cursor": 8,
+      "outputs": {
+        "poster": "poster.png",
+        "gif": "story-c.gif",
+        "webm": "story-c.webm",
+        "mp4": "story-c.mp4"
+      },
+      "output_sha256": {
+        "poster": "9b497f4e9655acf8b93963cf32e023d437f28f5fe63891e9a0f3872a042ebc26",
+        "gif": "364fc6ed2b07ba23ef4b57f01f58b8c744092e9c22bf08dd10ba79f7f633ea66",
+        "webm": "85f5af20a5205567af5ec53c34eb87602bb3ac70c5de3f69deb16345bda06851",
+        "mp4": "ed8624d6b63fcef999090b30edd70a10e37e7744540d14ce8c16e0aae2fe5b3b"
+      },
+      "intentional_checkpoint_suppression": "production emitted sequence; no capture-side selection",
+      "capture_choreography": "exact emitted-item seeking"
+    },
+    "D": {
+      "story_id": "D",
+      "case_id": "four-robot-nonparticipant",
+      "source_commit": "c29354f5ae6d334e9d4c624a3627efb16a8e77a1",
+      "replay_sha256": "90e510ad85dee503b1f70542d3331c0dd86bba90e30f8645021bdb2957754036",
+      "first_item": {
+        "kind": "explain",
+        "tick": 18,
+        "checkpoint": "after-confirmation",
+        "stage_id": "proposal-ready"
+      },
+      "terminal_item": {
+        "kind": "explain",
+        "tick": 18,
+        "checkpoint": "after-recovery-install",
+        "stage_id": "atomic-publication"
+      },
+      "tick_bounds": {
+        "first": 18,
+        "last": 18
+      },
+      "emitted_item_count": 3,
+      "runtime_item_count": 0,
+      "explain_item_count": 3,
+      "montage_gap_item_count": 0,
+      "montage_gap_count": 0,
+      "emitted_duration_ms": 2500,
+      "encoding_time_scale": 1.0,
+      "capture_duration_ms": 5000,
+      "terminal_loop_hold_ms": 2500,
+      "target_duration_ms": [
+        5000,
+        7000
+      ],
+      "poster_frame_cursor": 2,
+      "outputs": {
+        "poster": "poster.png",
+        "gif": "story-d.gif",
+        "webm": "story-d.webm",
+        "mp4": "story-d.mp4"
+      },
+      "output_sha256": {
+        "poster": "14cb89216798e6778c87ef3f3e9df1e60e01da9abb4b749b2b02ee5d59d094be",
+        "gif": "f882332c82fd42ca544bbd439acd42bc3c9b0bc29d409f464746b8b767179edd",
+        "webm": "b50f72f0facf2db243f449ede97ddc89addd9c424bd1785d16cdf5ea09a1b4b1",
+        "mp4": "f2809b9ece8c1059c8566919e30ae491a4d42855014da5c2278c3b3b5c7bb66e"
+      },
+      "intentional_checkpoint_suppression": "production emitted sequence; no capture-side selection",
+      "capture_choreography": "exact emitted-item seeking"
+    },
+    "E": {
+      "story_id": "E",
+      "case_id": "three-robot-delayed",
+      "source_commit": "c29354f5ae6d334e9d4c624a3627efb16a8e77a1",
+      "replay_sha256": "9be59b71a72ea1b0aab361b88adbe96cb2ba93d6442cb21bd5cfd0b4c50a5632",
+      "first_item": {
+        "kind": "runtime",
+        "tick": 33,
+        "checkpoint": "after-action-start",
+        "stage_id": "predecessor-starts"
+      },
+      "terminal_item": {
+        "kind": "runtime",
+        "tick": 36,
+        "checkpoint": "after-action-start",
+        "stage_id": "successor-starts"
+      },
+      "tick_bounds": {
+        "first": 33,
+        "last": 36
+      },
+      "emitted_item_count": 9,
+      "runtime_item_count": 9,
+      "explain_item_count": 0,
+      "montage_gap_item_count": 0,
+      "montage_gap_count": 0,
+      "emitted_duration_ms": 3850,
+      "encoding_time_scale": 1.3,
+      "capture_duration_ms": 6005,
+      "terminal_loop_hold_ms": 1000,
+      "target_duration_ms": [
+        6000,
+        8000
+      ],
+      "poster_frame_cursor": 5,
+      "outputs": {
+        "poster": "poster.png",
+        "gif": "story-e.gif",
+        "webm": "story-e.webm",
+        "mp4": "story-e.mp4"
+      },
+      "output_sha256": {
+        "poster": "1257649b2f09ba85f2bcbe274f1ba9f231176c6c21e956c6408753b0adb52914",
+        "gif": "6be5cb5a288bfac0eae879c273a034ca75ea3d6bda5609ebf5894ea56b676187",
+        "webm": "b6878a2c31e9edf7902da1d4342334acba7331d2697bfa44b8edd96237180647",
+        "mp4": "876103693952a3aee3f4a8ad7de43528695ebe63afd778410ee7ee5df4c4dc19"
+      },
+      "intentional_checkpoint_suppression": "production emitted sequence; no capture-side selection",
+      "capture_choreography": "exact emitted-item seeking"
+    },
+    "F": {
+      "story_id": "F",
+      "case_id": "random-k3-two-recoveries-seed615",
+      "source_commit": "c29354f5ae6d334e9d4c624a3627efb16a8e77a1",
+      "replay_sha256": "326508b376863fbca6f7c5e221ebf3939b651003af86ce25bef2810092609d67",
+      "first_item": {
+        "kind": "runtime",
+        "tick": 6,
+        "checkpoint": "after-action-start",
+        "stage_id": "first-incident"
+      },
+      "terminal_item": {
+        "kind": "runtime",
+        "tick": 147,
+        "checkpoint": "after-task-advance",
+        "stage_id": "clean-drain"
+      },
+      "tick_bounds": {
+        "first": 6,
+        "last": 147
+      },
+      "emitted_item_count": 94,
+      "runtime_item_count": 89,
+      "explain_item_count": 0,
+      "montage_gap_item_count": 5,
+      "montage_gap_count": 5,
+      "emitted_duration_ms": 23080,
+      "encoding_time_scale": 0.45,
+      "capture_duration_ms": 11386,
+      "terminal_loop_hold_ms": 1000,
+      "target_duration_ms": [
+        8000,
+        12000
+      ],
+      "poster_frame_cursor": 93,
+      "outputs": {
+        "poster": "poster.png",
+        "gif": "story-f.gif",
+        "webm": "story-f.webm",
+        "mp4": "story-f.mp4"
+      },
+      "output_sha256": {
+        "poster": "556185ea650b3495149da44433b7af531c42479055782c252e149e7aef2eaba9",
+        "gif": "ae4ca427d731542f35efdb0cc29f36dc4749dea6565a5444aa16258468fd4afd",
+        "webm": "e1df95210e22a5fa0247e3df17728f29627a7d8b33ac130f4b672f0166124eb7",
+        "mp4": "ef568fed1034ae9fc710a7bb18a149cd66f5f2f02a34cd36d932929630160654"
+      },
+      "intentional_checkpoint_suppression": "production emitted sequence; no capture-side selection",
+      "capture_choreography": "five labeled montage gaps"
+    }
+  }
+}
