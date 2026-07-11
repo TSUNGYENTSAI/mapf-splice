@@ -124,3 +124,44 @@ def test_stale_plan_version_in_scope_is_unsupported() -> None:
     result = plan_recovery(world, (("R1", 1), ("R2", 2)), OPEN)
     assert isinstance(result, RecoveryPlanningFailure)
     assert result.reason is RecoveryFailureReason.UNSUPPORTED_SCOPE
+
+
+def test_recovery_receives_full_affected_scope_not_just_core() -> None:
+    from mapf_splice.deadlock import DeadlockController
+    from mapf_splice.domain import ActionRef, VertexResource
+    from mapf_splice.preview import PreviewAnalysis, ProspectiveDependency
+
+    world = _dropoff_world(
+        {
+            "R1": (Cell(0, 0), Cell(0, 4)),
+            "R2": (Cell(2, 0), Cell(2, 4)),
+            "R3": (Cell(1, 0), Cell(1, 4)),  # upstream waiter, not in the cycle core
+        }
+    )
+
+    def dep(waiting: str, blocking: str) -> ProspectiveDependency:
+        return ProspectiveDependency(
+            waiting_robot_id=waiting,
+            waiting_plan_version=2,
+            preview_action_ref=ActionRef(waiting, 2, 1),
+            blocking_robot_id=blocking,
+            blocking_plan_version=2,
+            resource=VertexResource(Cell(0, 0)),
+            blocking_action_refs=(ActionRef(blocking, 2, 0),),
+            occupied_blocker=False,
+        )
+
+    # Core R1<->R2; R3 waits into R1 -> affected scope is R1,R2,R3.
+    analysis = PreviewAnalysis(
+        (dep("R1", "R2"), dep("R2", "R1"), dep("R3", "R1")), ()
+    )
+    controller = DeadlockController(1)
+    controller.observe(analysis, {"R1": 2, "R2": 2, "R3": 2})
+    containment = controller.containment
+    assert containment.trigger_core_identity == (("R1", 2), ("R2", 2))
+    assert containment.scope_identity == (("R1", 2), ("R2", 2), ("R3", 2))
+
+    result = plan_recovery(world, containment.scope_identity, OPEN)
+    assert isinstance(result, RecoveryProposal)
+    assert result.scope_identity == (("R1", 2), ("R2", 2), ("R3", 2))
+    assert set(result.plans) == {"R1", "R2", "R3"}

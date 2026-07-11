@@ -62,3 +62,28 @@ def test_frames_before_recovery_have_null_recovery() -> None:
     artifact = _hero_artifact(3)
     # The very first frame (tick 0) precedes any containment/recovery.
     assert artifact["frames"][0]["recovery"] is None
+
+
+def test_replay_exposes_cycle_core_and_affected_scope() -> None:
+    artifact = _hero_artifact(3)
+    validate_replay(artifact)  # schema requires trigger_core + scope
+
+    seen_candidate = False
+    for frame in artifact["frames"]:
+        for candidate in frame["deadlock"]["candidates"]:
+            assert "trigger_core" in candidate
+            assert "scope" in candidate
+            assert "identity" not in candidate  # no ambiguous conflated field
+            seen_candidate = True
+    assert seen_candidate
+
+    contained = [
+        frame["deadlock"]["containment"]
+        for frame in artifact["frames"]
+        if frame["deadlock"]["containment"] is not None
+    ]
+    assert contained
+    containment = contained[-1]
+    assert "identity" not in containment
+    assert [m["robot_id"] for m in containment["trigger_core"]] == ["R1", "R2", "R3"]
+    assert [m["robot_id"] for m in containment["scope"]] == ["R1", "R2", "R3"]

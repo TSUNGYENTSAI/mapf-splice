@@ -1,7 +1,15 @@
 """Cycle core vs affected scope: group derivation, stability, containment."""
-from mapf_splice.deadlock import DeadlockController, ProspectiveDeadlockGroup
-from mapf_splice.domain import ActionRef, Cell, VertexResource
+from mapf_splice.deadlock import (
+    ConfirmationOutcome,
+    ContainmentState,
+    DeadlockController,
+    ProspectiveDeadlockGroup,
+)
+from mapf_splice.domain import ActionRef, Cell, Robot, Task, TaskStatus, VertexResource
+from mapf_splice.planning import compile_path
 from mapf_splice.preview import PreviewAnalysis, ProspectiveDependency
+from mapf_splice.traffic import CommittedReservationLedger
+from mapf_splice.world import WorldState
 
 
 def _dependency(waiting, blocking, *, resource=None):
@@ -79,3 +87,96 @@ def test_evidence_only_change_does_not_reset_count() -> None:
     assert first.observations[0].count == 1
     assert second.observations[0].count == 2
     assert second.expired == ()
+
+
+def _plan(robot_id: str, version: int):
+    return compile_path(
+        (Cell(0, 0),), robot_id=robot_id, plan_version=version, task_id="T"
+    )
+
+
+def _installed_world(routes: dict[str, tuple[Cell, ...]]) -> WorldState:
+    robots = {
+        r: Robot(r, route[0], active_task_id=f"T-{r}") for r, route in routes.items()
+    }
+    tasks = {
+        f"T-{r}": Task(f"T-{r}", route[0], route[-1], 0, TaskStatus.ASSIGNED, r)
+        for r, route in routes.items()
+    }
+    world = WorldState(
+        reservations=CommittedReservationLedger(horizon=1),
+        robots=robots,
+        tasks=tasks,
+    )
+    for r in sorted(routes):
+        world.install_plan(
+            compile_path(routes[r], robot_id=r, plan_version=1, task_id=f"T-{r}")
+        )
+        tasks[f"T-{r}"].transition_to(TaskStatus.TO_PICKUP)
+    return world
+
+
+def _contained_over_blocked(world: WorldState) -> DeadlockController:
+    controller = DeadlockController(1)
+    controller.observe(BLOCKED, {"R1": 1, "R2": 1, "R3": 1})
+    controller.refresh(world)
+    return controller
+
+
+# F: full-scope containment
+def test_full_scope_containment_includes_upstream_waiter() -> None:
+    controller = DeadlockController(1)
+    controller.observe(BLOCKED, {"R1": 1, "R2": 1, "R3": 1})
+    c = controller.containment
+    assert c.trigger_core_identity == (("R1", 1), ("R2", 1))
+    assert c.scope_identity == (("R1", 1), ("R2", 1), ("R3", 1))
+    # R3 is only an upstream waiter, not in the cycle core, yet it is contained.
+    for robot_id in ("R1", "R2", "R3"):
+        assert controller.is_contained(_plan(robot_id, 1)) is True
+    assert controller.is_contained(_plan("R4", 1)) is False
+    # a stale-version scope member is not contained
+    assert controller.is_contained(_plan("R3", 2)) is False
+
+
+# G: full-scope quiescence
+def test_quiescence_waits_for_every_scope_member() -> None:
+    world = _installed_world(
+        {
+            "R1": (Cell(0, 0), Cell(0, 1)),
+            "R2": (Cell(2, 0), Cell(2, 1)),
+            "R3": (Cell(4, 0), Cell(4, 1)),
+        }
+    )
+    # Only the upstream waiter R3 still holds committed motion authority.
+    world.reservations.acquire_initial_batch(
+        [world.plans["R3"]], occupied=world.occupied_cells()
+    )
+    controller = _contained_over_blocked(world)
+
+    assert controller.newly_quiescent(world) == ()
+    assert controller.containment.state is ContainmentState.DRAINING
+
+    world.reservations.release_unexecuted_plan(world.plans["R3"])
+    assert controller.newly_quiescent(world) == ((("R1", 1), ("R2", 1), ("R3", 1)),)
+    assert controller.containment.state is ContainmentState.QUIESCENT
+
+
+# H: confirmation scope larger than the confirmed cycle
+def test_confirmation_scope_larger_than_confirmed_cycle() -> None:
+    world = _installed_world(
+        {
+            "R1": (Cell(0, 0), Cell(0, 1)),
+            "R2": (Cell(0, 1), Cell(0, 0)),
+            "R3": (Cell(1, 0), Cell(0, 0)),
+        }
+    )
+    controller = _contained_over_blocked(world)
+    controller.newly_quiescent(world)
+
+    result = controller.confirm(world, tick=18)
+    assert result.outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK
+    assert result.trigger_core_identity == (("R1", 1), ("R2", 1))
+    assert result.scope_identity == (("R1", 1), ("R2", 1), ("R3", 1))
+    assert {member[0] for member in result.graph.scope} == {"R1", "R2", "R3"}
+    assert result.graph.cyclic_sccs == (("R1", "R2"),)
+    assert controller.containment.state is ContainmentState.CONFIRMED_DEADLOCK
