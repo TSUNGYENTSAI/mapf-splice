@@ -1,181 +1,484 @@
 # MAPF Splice
 
-MAPF Splice keeps robots independent during normal operation, coordinates only
-the affected subset when a local deadlock persists, and safely splices
-synchronized recovery paths into an asynchronous fleet executor.
+**A reference architecture for inserting scoped MAPF recovery into a continuously running, asynchronous AMR fleet.**
 
-![Story B: R1–R3 enter scoped recovery while active R4 remains outside the participant set](docs/assets/story-media/v0.1/story-b-local-recovery.gif)
+MAPF research usually ends when a solver returns collision-free synchronized
+paths. A fleet-management system still has to answer the harder integration
+questions:
 
-**Story B · `four-robot-nonparticipant`.** This focused replay demonstrates
-local recovery with an active non-participant: only the affected subset is
-coordinated, while R4 keeps its live plan and continues through the shared
-traffic authority. Stories E and F separately demonstrate delayed execution and
-lifelong redispatch; this clip is not presented as a composite runtime.
+- Which robots should stop, and which should keep working?
+- When is a predicted resource cycle an actual deadlock?
+- How can synchronized paths run on robots with unequal action durations?
+- How can several live plans be replaced without exposing a partial state?
+- How does recovery return control to ordinary dispatch and traffic admission?
 
-## Why this project exists
+MAPF Splice implements that control boundary. Normal operation remains
+independent routing plus rolling traffic authority. MAPF is invoked only as a
+bounded intervention for a confirmed local deadlock.
 
-A bounded MAPF solver returns synchronized timestep paths. A continuous robot
-fleet needs more: tasks keep arriving, normal robots retain rolling traffic
-authority, live plans may be replaced only at a safe boundary, and actions take
-unequal time. MAPF Splice is the integration layer between those worlds. It
-detects persistent local risk, drains the affected authority, confirms the
-deadlock from current state, compiles scoped recovery into an ADG, and publishes
-the new plan generations atomically.
+<p align="center">
+  <img src="docs/assets/story-media/v0.1/story-b-local-recovery.gif" width="100%" alt="R1 through R3 enter local recovery while active non-participant R4 keeps its existing plan">
+</p>
 
-## Six design problems
+> **The central claim:** R1–R3 can enter a coordinated recovery transaction
+> while R4 remains active, keeps its current plan generation, and continues to
+> arbitrate traffic through the same global occupancy and reservation authority.
 
-### A · Paths are not executable actions
+## The operational scenario
 
-**Problem.** Synchronized paths do not specify how an asynchronous executor
-should handle unequal action duration.
+Consider a live warehouse fleet rather than an isolated MAPF instance:
 
-**Design response.** The compiler turns every solver step into a typed move or
-wait action with explicit same-robot order, replay-backed cross-robot
-dependencies, and resource claims.
+1. Robots receive pickup-and-delivery tasks continuously.
+2. Each robot follows an independently planned route.
+3. A rolling committed window grants exclusive motion authority over the next
+   `K` actions; a read-only preview looks another `K` actions ahead.
+4. Previewed resource claims form a prospective dependency cycle among a local
+   subset of robots.
+5. Unrelated robots may still be moving and must not be pulled into a global
+   replan.
+6. Already-authorized actions cannot simply be revoked; they must drain to a
+   deterministic action boundary.
+7. A recovery solver returns synchronized paths, but the fleet executor remains
+   asynchronous and versioned.
 
-![Story A: synchronized paths become 33 recorded actions and explicit precedence](docs/assets/story-media/v0.1/story-a-paths-to-actions.gif)
+The project is built around this integration problem, not around implementing a
+new general-purpose MAPF algorithm.
 
-**Takeaway.** MAPF paths become explicit actions and dependencies before they
-enter the fleet executor.
+## End-to-end architecture
 
-### B · Coordinate only what is necessary
+### Normal fleet operation
 
-**Problem.** Globally replanning every active robot discards useful normal
-autonomy and obscures the local incident.
+```mermaid
+flowchart TD
+    A["Release lifelong<br/>transport tasks"]
+    B["Dispatch work<br/>to available robots"]
+    C["Plan independent<br/>cruise routes"]
+    D["Atomically admit a<br/>K-action authority window"]
+    E["Execute actions<br/>asynchronously"]
+    F["Advance task phase<br/>and redispatch"]
+    G["Preview future<br/>resource claims"]
+    H["Detect prospective<br/>dependency evidence"]
 
-**Design response.** Stable prospective risk identifies an affected scope;
-only that frozen subset enters MAPF and the atomic splice. Other robots keep
-their plans under the same occupancy and reservation authority.
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> A
+    D --> G
+    G --> H
+```
 
-![Story B: affected R1–R3 recover locally while R4 remains active](docs/assets/story-media/v0.1/story-b-local-recovery.gif)
+### Local recovery intervention
 
-**Takeaway.** Normal robots remain independent; MAPF coordinates only the
-frozen local scope.
+```mermaid
+flowchart TD
+    A["Stable prospective<br/>dependency cycle"]
+    B["Freeze affected<br/>plan generations"]
+    C["Stop extending<br/>committed authority"]
+    D["Drain already-authorized<br/>actions"]
+    E["Capture a quiescent<br/>authoritative snapshot"]
+    F{"Circular wait<br/>still present?"}
+    G["Resume normal<br/>traffic admission"]
+    H["Run scoped MAPF from<br/>current positions"]
+    I["Validate synchronized<br/>recovery paths"]
+    J["Compile actions,<br/>claims, and ADG"]
+    K["Revalidate the<br/>group transaction"]
+    L["Atomically publish<br/>participant plans"]
+    M["Execute recovery<br/>asynchronously"]
 
-### C · Detect, contain, then confirm
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F -- No --> G
+    F -- Yes --> H
+    H --> I
+    I --> J
+    J --> K
+    K --> L
+    L --> M
+    M --> G
+```
 
-**Problem.** The first future SCC may be transient; treating it as a hard
-deadlock would confuse previewed contention with current reservation authority.
-
-**Design response.** The controller observes stability, contains the affected
-scope, drains committed motion to quiescence, then builds an authoritative
-wait-for graph from current positions and committed resources.
-
-![Story C: prospective risk becomes a distinct confirmed wait-for graph](docs/assets/story-media/v0.1/story-c-detect-contain-confirm.gif)
-
-**Takeaway.** Confirm circular wait from authoritative state before recovery.
-
-### D · Recovery is a transaction
-
-**Problem.** A proposal may be stale by installation time, while sequential
-per-robot replacement could partially mutate a live fleet.
-
-**Design response.** Installation revalidates incident identity, versions,
-positions, tasks, quiescence, reservations, and the compiled ADG as one group
-gate; one recorded publication changes R1–R3 together and leaves R4 unchanged.
-
-![Story D: one atomic publication replaces every participant plan together](docs/assets/story-media/v0.1/story-d-atomic-splice.gif)
-
-**Takeaway.** Every affected plan is replaced together—or none change.
-
-### E · Safe without lockstep execution
-
-**Problem.** Installed synchronized paths still cannot require simultaneous
-robot motion.
-
-**Design response.** ADG precedence gates independently timed actions. In the
-captured handoff, R2 completes `R2@3:2` at T36 `after-completions`; only then is
-R1 admitted and started at T36 `after-action-start`.
-
-![Story E: R2 completes before dependent R1 starts in the same phased tick](docs/assets/story-media/v0.1/story-e-asynchronous-adg.gif)
-
-**Takeaway.** ADG causality preserves the synchronized solution while ordinary
-execution handles unequal duration.
-
-### F · Recovery is part of the lifecycle
-
-**Problem.** Stopping immediately after escape does not demonstrate continuous
-fleet integration.
-
-**Design response.** Six continuous replay windows show recovery, resumed
-motion, task completion and redispatch, a second recovery, and exact terminal
-drain. Five labeled montage gaps disclose every skipped tick range.
-
-![Story F: recover, resume, redispatch, recover again, and drain](docs/assets/story-media/v0.1/story-f-lifelong-operation.gif)
-
-**Takeaway.** Robots return to normal dispatch and later incidents after a
-recovery is released.
-
-## Whole-system flow
+The recovery controller therefore follows a strict sequence:
 
 ```text
-lifelong tasks
-→ independent A*
-→ committed traffic authority
-→ prospective risk
-→ contain and drain
-→ confirmed deadlock
-→ scoped MAPF
-→ ADG compilation
-→ atomic plan splice
-→ asynchronous execution
-→ normal operation
+observe → stabilize → contain → drain → confirm
+        → solve → compile → validate → atomically splice → resume
 ```
 
-The domain and execution kernel remain deterministic and independent of I/O,
-wall-clock time, rendering, and a particular MAPF solver. Current simulated
-positions and committed resources are authoritative; recovery plans never
-replace them by assumption.
+It never treats preview evidence as committed authority, never assumes that a
+solver path is directly executable, and never installs participant plans one at
+a time.
 
-## Evidence and reproduction
+## Key design decisions
 
-Launch the production Inspector with the canonical v0.1 corpus:
+### 1. Prediction and authority are different data
+
+The preview horizon is advisory. It may expose future contention and
+prospective blocker edges, but it never owns a vertex or edge and cannot evict a
+committed claim. Deadlock confirmation is rebuilt only after the affected plans
+reach quiescence, using current positions and committed resources.
+
+This prevents a transient SCC in a look-ahead graph from being mislabeled as an
+authoritative deadlock.
+
+### 2. Recovery scope is local; safety authority remains global
+
+Only the confirmed affected scope is sent to MAPF and plan replacement.
+Non-participants keep their current plans. They are not ignored, however:
+normal and recovery traffic still arbitrate against the same global occupancy
+and reservation ledger.
+
+A moving robot outside the participant set can therefore delay recovery
+admission without being silently converted into part of the recovery problem.
+
+### 3. A MAPF path is compiled, not executed directly
+
+The solver boundary returns synchronized position sequences. Before runtime
+installation, MAPF Splice validates them and compiles them into executor-native
+objects:
+
+- finite `move` and `wait` actions;
+- deterministic action identities `(robot_id, plan_version, action_index)`;
+- same-robot sequencing;
+- cross-robot precedence for shared resources;
+- explicit vertex and edge claims;
+- an Action Dependency Graph (ADG) that must be acyclic.
+
+The result preserves the causal ordering of the synchronized solution without
+requiring the robots to move in lockstep.
+
+### 4. Recovery installation is a multi-robot transaction
+
+A recovery proposal is bound to a specific incident, confirmation tick, affected
+scope, trigger core, and expected plan versions. Before mutation, the system
+revalidates the complete group:
+
+- incident identity and participant set;
+- current plan generations;
+- authoritative positions and task phases;
+- quiescence and reservation state;
+- replacement-plan starts and compiled ADG validity.
+
+All participant generations are then published together—or the world remains
+unchanged. A stale proposal cannot partially replace a live fleet.
+
+### 5. Cruise authority and recovery authority are not conflated
+
+Normal execution acquires its initial `K`-action committed window atomically.
+Recovery execution is dependency-aware and action-boundary oriented. Both use
+the same authoritative ledger, but they are intentionally different admission
+profiles rather than one policy forced onto two execution models.
+
+### 6. Observability cannot change the answer
+
+The simulation kernel emits deterministic, immutable replay snapshots. The Web
+Inspector only consumes those snapshots; it does not route, reserve resources,
+derive dependency graphs, calculate SCCs, or mutate runtime state.
+
+This keeps visual explanation, test evidence, and system behavior on the same
+recorded timeline.
+
+## Getting started
+
+MAPF Splice is a pure-Python project managed with [uv](https://docs.astral.sh/uv/).
+uv provisions a compatible interpreter automatically, so a preinstalled system
+Python is not required.
+
+### Prerequisites
+
+| To… | Requirements |
+| --- | --- |
+| Run the simulator and Web Inspector | [uv](https://docs.astral.sh/uv/getting-started/installation/); Python ≥ 3.11 (uv can install it) |
+| Develop and run the tests | the above; *optionally* Node.js, Playwright, and Chromium for the browser-based Story Display tests |
+| Regenerate the story media | the above, plus Node.js, Playwright with Chromium, FFmpeg, and FFprobe |
+
+The vendored recovery solver (NumPy) and the developer tools (pytest, ruff) are
+installed automatically by `uv sync`. The Inspector is a static offline page
+rendered by your browser, so Node.js is **not** needed to view the stories —
+only to run the browser tests or capture media.
+
+### Installation
 
 ```bash
-uv run mapf-splice-inspect --lifelong-cases validation/lifelong --no-open
+git clone <repository-url>
+cd mapf-splice
+uv sync --frozen
 ```
 
-Reproduce all six media assets from exact emitted items:
+`uv sync --frozen` reproduces the exact locked environment from `uv.lock`.
+
+### Quick start
+
+Serve the Web Inspector over the canonical v0.1 corpus:
+
+```bash
+uv run mapf-splice-inspect --lifelong-cases validation/lifelong
+```
+
+The command prints `MAPF Splice Inspector: http://127.0.0.1:8765` and opens that
+page in your browser. It loads an eight-case catalog and plays the six Story
+Displays (A–F), backed by canonical replays from the same deterministic kernel
+the tests exercise. Add `--no-open` to serve without launching a browser, or
+`--port <n>` to change the port.
+
+### Verify the installation
+
+A fast smoke test over the deterministic validation corpus:
+
+```bash
+uv run pytest tests/test_lifelong_validation.py -q
+```
+
+The full suite:
+
+```bash
+uv run pytest -q
+```
+
+The browser-based Story Display tests skip automatically when Node.js,
+Playwright, or Chromium are unavailable; every other test runs from a bare
+`uv sync` install.
+
+## How to read the replays
+
+Each story display presents three synchronized views:
+
+- **Physical view** — authoritative positions, routes, committed motion, and
+  recovery scope.
+- **Logical view** — dependency graphs, ADG handoffs, plan-generation
+  transactions, or lifecycle state.
+- **Lifecycle view** — the exact recorded stage or checkpoint currently shown.
+
+The six stories below are ordered by the runtime argument rather than by their
+letter labels.
+
+## Executable design evidence
+
+### Story B — Local Recovery, Not Global Replanning
+
+**Question:** Can the controller coordinate only the robots involved in the
+incident while an unrelated robot remains active?
+
+<p align="center">
+  <img src="docs/assets/story-media/v0.1/story-b-local-recovery.gif" width="100%" alt="Local recovery of R1 through R3 while R4 remains outside the participant set">
+</p>
+
+**What to inspect**
+
+- R1–R3 become the affected scope and drain their existing authority.
+- R4 stays outside the participant set and retains its exact plan generation.
+- R4 still participates in global occupancy and reservation arbitration.
+- The replay retains all 82 emitted runtime items from T12 through T34.
+
+This is the core fleet-level decision: **coordinate locally without pretending
+the rest of the fleet disappeared.**
+
+### Story C — Detect, Contain, Then Confirm
+
+**Question:** How does the controller avoid treating every predicted cycle as a
+hard deadlock?
+
+<p align="center">
+  <img src="docs/assets/story-media/v0.1/story-c-detect-contain-confirm.gif" width="100%" alt="Prospective dependency graph changes into a confirmed wait-for graph after containment and drain">
+</p>
+
+**What to inspect**
+
+- The initial graph is prospective evidence derived from future claims.
+- A stable SCC triggers containment, not immediate MAPF execution.
+- Already-committed actions drain before confirmation.
+- The final wait-for graph is rebuilt from authoritative state and is visibly
+  different from the preview graph.
+
+The distinction is operationally important: **risk prediction decides where to
+look; current authority decides whether recovery is justified.**
+
+### Story A — Paths Are Not Executable Actions
+
+**Question:** What must happen between a synchronized MAPF result and a real
+asynchronous executor?
+
+<p align="center">
+  <img src="docs/assets/story-media/v0.1/story-a-paths-to-actions.gif" width="100%" alt="Synchronized MAPF paths are compiled into actions and explicit cross-robot precedence">
+</p>
+
+**What to inspect**
+
+- Three synchronized solver paths are converted into 33 recorded actions.
+- Same-robot ordering is explicit rather than implied by array position.
+- Ten cross-robot edges preserve the ordering of shared-resource visits.
+- Resource claims become part of the executable plan, not UI annotations.
+
+The solver produces spatial coordination; the compiler produces a runtime
+contract.
+
+### Story D — Atomic Plan Splice
+
+**Question:** How can several affected plans be replaced without exposing a
+half-installed recovery?
+
+<p align="center">
+  <img src="docs/assets/story-media/v0.1/story-d-atomic-splice.gif" width="100%" alt="R1 through R3 change plan generations in one atomic publication while R4 remains unchanged">
+</p>
+
+**What to inspect**
+
+- The proposal passes one validation boundary for the complete participant set.
+- R1–R3 change from plan generation `v2` to `v3` in one recorded publication.
+- R4 remains exactly at `v2` because it is outside the transaction.
+- A failure before publication would leave every robot, reservation, and plan
+  version unchanged.
+
+This is optimistic concurrency control applied to live multi-robot plans.
+
+### Story E — Asynchronous Recovery Through an ADG
+
+**Question:** Does the recovery remain safe when robot actions take different
+amounts of time?
+
+<p align="center">
+  <img src="docs/assets/story-media/v0.1/story-e-asynchronous-adg.gif" width="100%" alt="R1 waits while predecessor R2 is running and starts only after the ADG dependency completes">
+</p>
+
+**What to inspect**
+
+- R2 is still running while R1's successor action remains non-running.
+- The dependency is recorded against concrete action identities.
+- R1 becomes admissible only after R2 completes the predecessor action.
+- No wall-clock synchronization or simultaneous start is required.
+
+The ADG preserves MAPF causality while the executor remains independently
+timed.
+
+### Story F — Return to Lifelong Operation
+
+**Question:** Is recovery integrated into continuous fleet work, or does the
+demo stop once the robots escape the first incident?
+
+<p align="center">
+  <img src="docs/assets/story-media/v0.1/story-f-lifelong-operation.gif" width="100%" alt="The fleet recovers, resumes work, redispatches, encounters another incident, and drains cleanly">
+</p>
+
+**What to inspect**
+
+- The first recovery completes and normal task execution resumes.
+- Robots perform later useful work and are redispatched.
+- A second recovery occurs inside the same lifelong run.
+- The system reaches a clean terminal drain after 14 recorded tasks complete.
+- Five explicitly labeled montage gaps disclose every presentation-only skip.
+
+Recovery is therefore a bounded control episode inside the task lifecycle, not
+a special terminal mode.
+
+## Responsibility boundaries
+
+The implementation is organized around ownership rather than around one large
+"fleet manager" object:
+
+- **Domain state** owns robots, tasks, actions, versioned plans, reservations,
+  and aggregate invariants.
+- **Dispatch and routing** choose tasks and spatial routes but do not own traffic
+  authority.
+- **Traffic admission** owns the committed ledger, batch arbitration, rolling
+  windows, and read-only preview evidence; it does not classify deadlocks.
+- **Deadlock analysis** owns prospective SCC stability, affected-scope
+  selection, containment, and authoritative wait-for confirmation.
+- **Recovery orchestration** owns incident-bound proposals, scoped solver calls,
+  validation, and atomic plan replacement.
+- **MAPF and compiler adapters** isolate solver-specific data and translate
+  synchronized paths into validated actions and ADG dependencies.
+- **Execution** advances actions in deterministic phases and rejects stale plan
+  generations.
+- **Replay and Inspector** provide read-only evidence and cannot influence the
+  kernel.
+
+These boundaries let a production system replace the solver, dispatcher,
+visualizer, or external robot adapter without moving safety and authority rules
+out of the core model.
+
+## Correctness model
+
+The system uses one authoritative `WorldState` and a deterministic phased tick
+loop. Asynchrony is represented by multi-tick action duration and explicit
+waits—not by nondeterministic threads or animation timing.
+
+Core invariants include:
+
+1. A vertex cannot be occupied by more than one robot.
+2. Two robots cannot traverse the same undirected edge in opposite directions
+   during overlapping intervals.
+3. A committed resource belongs to one plan generation.
+4. A stale action, completion, or proposal cannot mutate a newer plan.
+5. An action cannot start before its dependencies complete and its claims are
+   valid.
+6. Planning may release unexecuted future reservations; it may not release
+   current occupancy by assumption.
+7. Preview claims never own resources and cannot displace committed authority.
+8. Solver or transaction failure leaves the fleet in a diagnosable fail-safe
+   state without partial installation.
+
+See [System architecture and invariants](docs/ARCHITECTURE.md) for the detailed
+execution phases and validation rules.
+
+## Reproduce the published media
+
+The checked-in GIFs are generated by a capture bridge that drives the production
+playback controller. It does not maintain a second capture-only timeline.
 
 ```bash
 uv run python tools/story_media/capture_story_media.py --all
 uv run python tools/story_media/capture_story_media.py --verify-only
 ```
 
-Run the full suite:
+The [media freeze manifest](docs/assets/story-media/v0.1/media-freeze.json)
+binds each asset to its source commit, replay SHA-256, first and terminal
+checkpoints, emitted-item sequence, viewport, tool versions, timing, and output
+hashes.
 
-```bash
-uv run pytest -q
-```
+## Scope and non-goals
 
-The frozen corpus contains 210 emitted items: Story B retains all 82 causal
-items from T12–T34, Story A retains all 33 compiled actions in the DOM, and
-Story F retains 89 runtime items plus five labeled montage gaps through exact
-T147 `after-task-advance`. The checked-in
-[media freeze](docs/assets/story-media/v0.1/media-freeze.json) binds each asset
-to source commit `c29354f`, replay SHA-256, exact first/terminal anchors,
-timing, tool versions, and output hashes. Raw frames and high-quality WebM/MP4
-remain reproducible ignored artifacts.
+MAPF Splice v0.1 is an executable reference architecture and validation corpus,
+not a deployable fleet-management product.
 
-Canonical design and validation references:
+**Modeled in v0.1**
 
-- [v0.1 scope and acceptance criteria](docs/V0_1.md)
-- [system architecture and invariants](docs/ARCHITECTURE.md)
-- [demo and article narrative](docs/DEMO_AND_BLOG.md)
-- [capture storyboard](docs/storyboards/V0_1_CAPTURE_STORYBOARD.md)
+- point robots on a discrete warehouse grid;
+- deterministic pickup-and-delivery task lifecycles;
+- independent A* routing and rolling vertex/edge reservations;
+- committed and preview motion horizons;
+- one active local recovery incident at a time;
+- scoped MAPF recovery from current state;
+- asynchronous action and ADG execution;
+- versioned, atomic multi-robot plan replacement;
+- deterministic replay and an offline Inspector.
+
+**Deliberately outside v0.1**
+
+- robot footprints, swept volume, and heterogeneous kinematics;
+- physical braking enforcement or hardware safety certification;
+- ROS, VDA 5050, networking, persistence, and distributed deployment;
+- communication delay and separate observed-versus-physical state models;
+- advanced dispatch, charging, battery, or throughput optimization;
+- fairness or global-liveness guarantees;
+- guaranteed recovery from every solvable warehouse configuration.
+
+The reference intentionally isolates the difficult control and execution
+semantics before introducing vendor protocols and physical integration.
+
+## Documentation
+
+- [v0.1 vision, scope, and acceptance criteria](docs/V0_1.md)
+- [System architecture and invariants](docs/ARCHITECTURE.md)
+- [Demo and technical narrative](docs/DEMO_AND_BLOG.md)
+- [Story capture storyboard](docs/storyboards/V0_1_CAPTURE_STORYBOARD.md)
 - [Story Display playback specification](docs/storyboards/V0_1_STORY_PLAYBACK_SPEC.md)
-
-## Scope and limitations
-
-MAPF Splice is a clean-room reference integration pattern, not a production
-FMS and not another MAPF solver. v0.1 uses point robots on a grid, bounded
-deterministic validation, and one active incident at a time. It does not claim
-fairness, global liveness, physical braking safety, fitted hardware timing, or
-dispatch optimization. MAPF supplies scoped recovery paths; the surrounding
-architecture owns confirmation, traffic authority, transactional installation,
-asynchronous execution, and return to normal work.
+- [Deterministic capture tooling](tools/story_media/README.md)
 
 ## License
 
-The project is licensed under the [MIT License](LICENSE). Vendored or external
-components retain their own notices in [NOTICE](NOTICE).
+Licensed under the [MIT License](LICENSE). Vendored and external components
+retain their own notices in [NOTICE](NOTICE).
