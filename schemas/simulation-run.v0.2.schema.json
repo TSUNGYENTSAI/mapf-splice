@@ -29,10 +29,14 @@
     "containment": {"type": "object", "additionalProperties": false, "required": ["identity", "state", "confirmation_tick", "outcome"], "properties": {"identity": {"type": "array"}, "state": {"enum": ["draining", "quiescent", "confirmed-deadlock", "unsupported"]}, "confirmation_tick": {"type": ["integer", "null"], "minimum": 0}, "outcome": {"enum": ["confirmed-deadlock", "unsupported-external", "clear", null]}}},
     "confirmed_edge": {"type": "object", "additionalProperties": false, "required": ["waiting_robot_id", "waiting_plan_version", "waiting_action_ref", "resource", "blocking_robot_id", "blocking_plan_version", "committed_blocker_refs", "occupied_blocker", "blocking_in_scope"], "properties": {"waiting_robot_id": {"type": "string"}, "waiting_plan_version": {"type": "integer", "minimum": 1}, "waiting_action_ref": {"$ref": "#/$defs/action_ref"}, "resource": {"type": "object"}, "blocking_robot_id": {"type": "string"}, "blocking_plan_version": {"type": "integer", "minimum": 0}, "committed_blocker_refs": {"type": "array", "items": {"$ref": "#/$defs/action_ref"}}, "occupied_blocker": {"type": "boolean"}, "blocking_in_scope": {"type": "boolean"}}},
     "confirmed_graph": {"type": "object", "additionalProperties": false, "required": ["scope", "captured_at_tick", "outcome", "state", "edges", "cyclic_sccs"], "properties": {"scope": {"type": "array"}, "captured_at_tick": {"type": "integer", "minimum": 0}, "outcome": {"enum": ["confirmed-deadlock", "unsupported-external", "clear"]}, "state": {"enum": ["draining", "quiescent", "confirmed-deadlock", "unsupported"]}, "edges": {"type": "array", "items": {"$ref": "#/$defs/confirmed_edge"}}, "cyclic_sccs": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}}}},
+    "robot_cell": {"type": "object", "additionalProperties": false, "required": ["robot_id", "cell"], "properties": {"robot_id": {"type": "string"}, "cell": {"$ref": "#/$defs/cell"}}},
+    "robot_path": {"type": "object", "additionalProperties": false, "required": ["robot_id", "cells"], "properties": {"robot_id": {"type": "string"}, "cells": {"type": "array", "items": {"$ref": "#/$defs/cell"}}}},
+    "recovery_solver": {"type": "object", "additionalProperties": false, "required": ["solver", "seed", "max_timestep", "makespan", "source_commit"], "properties": {"solver": {"type": "string"}, "seed": {"type": "integer"}, "max_timestep": {"type": "integer", "minimum": 1}, "makespan": {"type": "integer", "minimum": 0}, "source_commit": {"type": "string"}}},
+    "recovery": {"type": "object", "additionalProperties": false, "required": ["state", "failure_reason", "participants", "starts", "goals", "solver", "adg_compiled", "paths"], "properties": {"state": {"enum": ["not-attempted", "proposal-ready", "unsupported-or-failed"]}, "failure_reason": {"type": ["string", "null"]}, "participants": {"type": "array", "items": {"type": "string"}}, "starts": {"type": "array", "items": {"$ref": "#/$defs/robot_cell"}}, "goals": {"type": "array", "items": {"$ref": "#/$defs/robot_cell"}}, "solver": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/recovery_solver"}]}, "adg_compiled": {"type": "boolean"}, "paths": {"type": "array", "items": {"$ref": "#/$defs/robot_path"}}}},
     "frame": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["index", "tick", "checkpoint", "robots", "tasks", "plans", "reservations", "preview", "deadlock", "confirmed_wait_for", "events"],
+      "required": ["index", "tick", "checkpoint", "robots", "tasks", "plans", "reservations", "preview", "deadlock", "confirmed_wait_for", "recovery", "events"],
       "properties": {
         "index": {"type": "integer", "minimum": 0},
         "tick": {"type": "integer", "minimum": 0},
@@ -44,6 +48,7 @@
         "preview": {"type": "object", "required": ["dependencies", "contentions", "cyclic_sccs"]},
         "deadlock": {"type": "object", "required": ["threshold", "candidates", "containment", "newly_stable"], "properties": {"containment": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/containment"}]}}},
         "confirmed_wait_for": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/confirmed_graph"}]},
+        "recovery": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/recovery"}]},
         "events": {"type": "array", "items": {"type": "object"}}
       }
     }

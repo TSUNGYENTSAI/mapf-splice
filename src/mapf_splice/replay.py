@@ -17,6 +17,7 @@ from mapf_splice.deadlock import (
 )
 from mapf_splice.domain import ActionRef, EdgeResource, Resource, VertexResource
 from mapf_splice.preview import PreviewAnalysis, preview_actions
+from mapf_splice.recovery import RecoveryState
 from mapf_splice.scenario import ScenarioBundle
 from mapf_splice.trace import EventTrace, TraceEvent
 from mapf_splice.world import WorldState
@@ -102,6 +103,53 @@ def _confirmed_graph(containment) -> dict[str, Any]:
         "state": containment.state.value,
         "edges": [_confirmed_edge(edge) for edge in graph.edges],
         "cyclic_sccs": [list(scc) for scc in graph.cyclic_sccs],
+    }
+
+
+def _recovery(containment) -> dict[str, Any] | None:
+    if containment is None or containment.recovery_state is RecoveryState.NOT_ATTEMPTED:
+        return None
+    proposal = containment.recovery_proposal
+    if proposal is not None:
+        participants = sorted(proposal.plans)
+        return {
+            "state": containment.recovery_state.value,
+            "failure_reason": None,
+            "participants": participants,
+            "starts": [
+                {"robot_id": r, "cell": _cell(proposal.starts[r])}
+                for r in participants
+            ],
+            "goals": [
+                {"robot_id": r, "cell": _cell(proposal.goals[r])}
+                for r in participants
+            ],
+            "solver": {
+                "solver": proposal.metadata.solver,
+                "seed": proposal.metadata.seed,
+                "max_timestep": proposal.metadata.max_timestep,
+                "makespan": proposal.metadata.makespan,
+                "source_commit": proposal.metadata.source_commit,
+            },
+            "adg_compiled": True,
+            "paths": [
+                {
+                    "robot_id": r,
+                    "cells": [_cell(cell) for cell in proposal.solution.paths[r]],
+                }
+                for r in participants
+            ],
+        }
+    failure = containment.recovery_failure
+    return {
+        "state": containment.recovery_state.value,
+        "failure_reason": failure.reason.value if failure else None,
+        "participants": [robot_id for robot_id, _ in containment.identity],
+        "starts": [],
+        "goals": [],
+        "solver": None,
+        "adg_compiled": False,
+        "paths": [],
     }
 
 
@@ -291,6 +339,7 @@ class FrameRecorder:
                     and containment.confirmed_graph is not None
                     else None
                 ),
+                "recovery": _recovery(containment),
                 "events": [_event(value) for value in events],
             }
         )

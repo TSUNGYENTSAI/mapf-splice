@@ -12,7 +12,7 @@ const resourceLabel = r => r.type === 'vertex' ? `V(${cellLabel(r.cell)})` : `E(
 
 const allEvents = frames.flatMap((frame, frameIndex) => frame.events.map(event => ({...event, frameIndex})));
 const bookmarkDefs = [
-  ['Dependency','prospective-dependency'],['Cyclic SCC','prospective-scc-observed'],['Stable SCC','stable-scc-detected'],['Containment','containment-started'],['Quiescence','quiescence-reached'],['Confirmed','confirmed-wait-for-built'],['Hard deadlock','hard-deadlock-confirmed'],['Cleared','containment-cleared'],['Unsupported','confirmation-unsupported']
+  ['Dependency','prospective-dependency'],['Cyclic SCC','prospective-scc-observed'],['Stable SCC','stable-scc-detected'],['Containment','containment-started'],['Quiescence','quiescence-reached'],['Confirmed','confirmed-wait-for-built'],['Hard deadlock','hard-deadlock-confirmed'],['Recovery','recovery-proposal-ready'],['Cleared','containment-cleared'],['Unsupported','confirmation-unsupported']
 ];
 const bookmarks = bookmarkDefs.map(([label,kind]) => ({label,kind,event:allEvents.find(e=>e.kind===kind)})).filter(x=>x.event);
 $('bookmarks').innerHTML = bookmarks.map((b,i)=>`<button data-bookmark="${i}">${b.label} · T${b.event.tick}</button>`).join('');
@@ -84,9 +84,18 @@ function renderConfirmed(frame){
   robots.forEach(id=>{const [x,y]=positions[id];svg+=`<circle cx="${x}" cy="${y}" r="18" fill="#141c21" stroke="${robotColor(id)}" stroke-width="2"/><text x="${x}" y="${y+4}" text-anchor="middle" fill="${robotColor(id)}" font-size="10" font-family="monospace">${esc(id)}</text>`;});
   $('confirmedGraph').innerHTML=`<svg viewBox="0 0 320 152">${svg}</svg><div class="scc"><strong>state ${esc(g.state)}</strong>${g.edges.length} edges · ${g.cyclic_sccs.length} cyclic scc(s)</div>`;
 }
+function renderRecovery(frame){
+  const r=frame.recovery;
+  if(!r){$('recoveryMeta').textContent='—';$('recovery').innerHTML='<div class="scc"><strong>No recovery</strong>Not attempted on this frame.</div>';return;}
+  if(r.state!=='proposal-ready'){$('recoveryMeta').textContent=r.state;$('recovery').innerHTML=`<div class="scc"><strong>${esc(r.state)}</strong>${esc(r.failure_reason||'—')} · ${esc(r.participants.join(','))}</div>`;return;}
+  const s=r.solver,goals=Object.fromEntries(r.goals.map(g=>[g.robot_id,g.cell])),starts=Object.fromEntries(r.starts.map(g=>[g.robot_id,g.cell]));
+  $('recoveryMeta').textContent=`${esc(s.solver)} · makespan ${s.makespan}`;
+  const rows=r.participants.map(id=>{const path=r.paths.find(p=>p.robot_id===id);return `<div class="scc"><strong style="color:${robotColor(id)}">${esc(id)}</strong>${cellLabel(starts[id])} → ${cellLabel(goals[id])} · ${path.cells.length-1} steps</div>`}).join('');
+  $('recovery').innerHTML=`<div class="scc"><strong>proposal ready</strong>seed ${s.seed} · max_t ${s.max_timestep} · makespan ${s.makespan} · ADG ${r.adg_compiled?'compiled':'—'}</div>${rows}`;
+}
 function renderEvents(frame){const robot=$('robotFilter').value,kind=$('kindFilter').value,events=frame.events.filter(e=>(!robot||e.robot_id===robot)&&(!kind||e.kind===kind));$('events').innerHTML=events.map(e=>`<div class="event"><span class="seq">#${e.sequence}</span><span class="phase">${esc(e.phase)}</span><span class="kind">${esc(e.kind)}</span><span>${esc(e.robot_id||'global')} ${esc(e.action_ref?.label||'')} ${esc(JSON.stringify(e.details))}</span></div>`).join('')||'<div class="event empty">No matching events at this checkpoint.</div>';}
 
-function render(){const frame=frames[index];$('tickLabel').textContent=`Tick ${frame.tick}`;$('checkpointLabel').textContent=frame.checkpoint;$('slider').value=index;$('frameLabel').textContent=`${index+1} / ${frames.length}`;$('warehouse').innerHTML=mapSvg(frame);renderPlans(frame);renderDetail(frame);renderGraph(frame);renderConfirmed(frame);renderEvents(frame);document.querySelectorAll('[data-bookmark]').forEach((b,i)=>b.classList.toggle('active',bookmarks[i].event.frameIndex===index));}
+function render(){const frame=frames[index];$('tickLabel').textContent=`Tick ${frame.tick}`;$('checkpointLabel').textContent=frame.checkpoint;$('slider').value=index;$('frameLabel').textContent=`${index+1} / ${frames.length}`;$('warehouse').innerHTML=mapSvg(frame);renderPlans(frame);renderDetail(frame);renderGraph(frame);renderConfirmed(frame);renderRecovery(frame);renderEvents(frame);document.querySelectorAll('[data-bookmark]').forEach((b,i)=>b.classList.toggle('active',bookmarks[i].event.frameIndex===index));}
 function move(delta){index=Math.max(0,Math.min(frames.length-1,index+delta));render();}
 function moveTick(delta){const tick=frames[index].tick+delta;const candidates=frames.map((f,i)=>[f,i]).filter(([f])=>f.tick===tick);if(candidates.length){index=delta>0?candidates[0][1]:candidates.at(-1)[1];render();}}
 function stop(){if(timer){clearInterval(timer);timer=null;$('play').textContent='Play';}}
