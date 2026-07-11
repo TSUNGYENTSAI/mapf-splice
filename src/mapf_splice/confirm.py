@@ -110,6 +110,33 @@ def build_confirmed_wait_for(
     )
 
 
+def affected_scope(
+    edges: Iterable[tuple[str, str]],
+    core: Iterable[str],
+) -> tuple[str, ...]:
+    """The upstream blocked closure of a cycle core over waiting -> blocking edges.
+
+    Returns every robot ``r`` for which a directed path ``r -> ... -> c`` exists
+    for some ``c`` in ``core`` (the core members included). Because an edge means
+    "waiting robot -> blocking robot", the closure is found by reverse-traversing
+    ``blocker -> waiters`` outward from the core. The result is sorted and
+    deterministic.
+    """
+    waiters: dict[str, set[str]] = {}
+    for waiting, blocking in edges:
+        waiters.setdefault(blocking, set()).add(waiting)
+        waiters.setdefault(waiting, set())
+    reached = set(core)
+    stack = list(reached)
+    while stack:
+        node = stack.pop()
+        for waiter in waiters.get(node, ()):
+            if waiter not in reached:
+                reached.add(waiter)
+                stack.append(waiter)
+    return tuple(sorted(reached))
+
+
 def cyclic_components(
     edges: Iterable[tuple[str, str]],
 ) -> tuple[tuple[str, ...], ...]:
