@@ -33,7 +33,7 @@ def export_run(
         if until == "quiescence" and any(
             event.kind is EventKind.QUIESCENCE_REACHED
             for event in simulator.trace.events
-        ):
+        ) and simulator.deadlock_controller.containment is None:
             reason = "quiescence"
             break
         if until == "tick" and simulator.world.tick >= (stop_tick or 0):

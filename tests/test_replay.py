@@ -47,8 +47,9 @@ def test_replay_contains_topology_and_ordered_full_snapshots() -> None:
         "handoff",
         "delivery",
     }
+    ordinary = tuple(c for c in CHECKPOINTS if c != "after-recovery-completion")
     assert [frame["checkpoint"] for frame in artifact["frames"][:8]] == list(
-        CHECKPOINTS
+        ordinary[:8]
     )
     order = {checkpoint: index for index, checkpoint in enumerate(CHECKPOINTS)}
     keys = [(frame["tick"], order[frame["checkpoint"]]) for frame in artifact["frames"]]
@@ -92,9 +93,19 @@ def test_after_confirmation_checkpoint_present_and_schema_v2() -> None:
     assert "after-confirmation" in artifact["checkpoint_names"]
     assert artifact["schema_version"] == "simulation-run.v0.2"
     assert artifact["$schema"] == "simulation-run.v0.2.schema.json"
+    ordinary = tuple(c for c in CHECKPOINTS if c != "after-recovery-completion")
     assert [frame["checkpoint"] for frame in artifact["frames"][:8]] == list(
-        CHECKPOINTS
+        ordinary[:8]
     )
+
+
+def test_checkpoint_order_is_monotonic_with_conditional_completion_frame() -> None:
+    _, artifact = _recorded(3)
+    order = {checkpoint: index for index, checkpoint in enumerate(CHECKPOINTS)}
+    by_tick = {}
+    for frame in artifact["frames"]:
+        by_tick.setdefault(frame["tick"], []).append(order[frame["checkpoint"]])
+    assert all(indices == sorted(indices) for indices in by_tick.values())
     for frame in artifact["frames"]:
         graph = frame["confirmed_wait_for"]
         assert graph is None or isinstance(graph, dict)

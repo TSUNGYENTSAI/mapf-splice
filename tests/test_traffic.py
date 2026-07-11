@@ -52,6 +52,8 @@ def test_initial_horizon_rejects_atomically_and_reports_safe_prefix() -> None:
     assert not decision.accepted
     assert decision.safe_prefix_length == 2
     assert ledger.committed_actions("R1", 1) == ()
+    assert not ledger.plan_initialized(plan)
+    assert plan.actions[0].status is ActionStatus.PLANNED
     assert decision.conflicts[0].occupied_by == "R2"
 
 

@@ -86,11 +86,15 @@ class WorldState:
                     )
             elif robot.payload_task_id is not None:
                 raise WorldStateError("robot carries a payload before pickup")
-            if task.status in {
-                TaskStatus.TO_PICKUP,
-                TaskStatus.CARRYING,
-                TaskStatus.TO_DROPOFF,
-            } and robot.id not in self.plans:
+            if (
+                task.status
+                in {
+                    TaskStatus.TO_PICKUP,
+                    TaskStatus.CARRYING,
+                    TaskStatus.TO_DROPOFF,
+                }
+                and robot.id not in self.plans
+            ):
                 raise WorldStateError("active task phase has no current plan")
 
         for task in self.tasks.values():
@@ -218,3 +222,52 @@ class WorldState:
         robot.install(plan)
         self.plans[robot.id] = plan
         self.validate()
+
+    def replace_plan_group(self, replacements: dict[str, Plan]) -> None:
+        """Publish a fully validated recovery plan group in one aggregate swap.
+
+        Callers must have validated incident/task/quiescence conditions. This
+        method constructs replacement robot and plan mappings first, validates
+        the staged aggregate, and swaps both mappings together; it never loops
+        through ``install_plan`` against live state.
+        """
+        if not replacements:
+            raise WorldStateError("recovery replacement group cannot be empty")
+        self.validate()
+        staged_robots = {
+            robot_id: Robot(
+                id=robot.id,
+                position=robot.position,
+                active_task_id=robot.active_task_id,
+                payload_task_id=robot.payload_task_id,
+                plan_version=robot.plan_version,
+                active_action_ref=robot.active_action_ref,
+                remaining_ticks=robot.remaining_ticks,
+            )
+            for robot_id, robot in self.robots.items()
+        }
+        staged_plans = dict(self.plans)
+        for robot_id, plan in replacements.items():
+            robot = staged_robots.get(robot_id)
+            current = staged_plans.get(robot_id)
+            if robot is None or current is None or robot.active_task_id != plan.task_id:
+                raise WorldStateError("replacement plan does not match active task")
+            if robot.active_action_ref is not None or robot.remaining_ticks:
+                raise WorldStateError("cannot replace a running plan")
+            if self.reservations.committed_actions(robot_id, robot.plan_version):
+                raise WorldStateError("cannot replace a reserved plan")
+            if plan.version != robot.plan_version + 1:
+                raise WorldStateError("replacement plan version is not next generation")
+            if plan.actions and plan.actions[0].start != robot.position:
+                raise WorldStateError("replacement plan does not start at position")
+            robot.plan_version = plan.version
+            staged_plans[robot_id] = plan
+        staged = WorldState(
+            reservations=self.reservations,
+            tick=self.tick,
+            robots=staged_robots,
+            tasks=self.tasks,
+            plans=staged_plans,
+        )
+        staged.validate()
+        self.robots, self.plans = staged.robots, staged.plans

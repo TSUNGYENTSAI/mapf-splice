@@ -19,6 +19,7 @@ from mapf_splice.domain import (
 from mapf_splice.planning import compile_path
 from mapf_splice.preview import PreviewAnalysis, ProspectiveDependency
 from mapf_splice.recovery import (
+    RecoveryIncidentRef,
     RecoveryProposal,
     RecoverySolverMetadata,
     RecoveryState,
@@ -215,18 +216,27 @@ def _confirmed_scope3_controller() -> DeadlockController:
 
 def _recovery_proposal(scope: tuple[tuple[str, int], ...]) -> RecoveryProposal:
     robot_ids = tuple(robot_id for robot_id, _ in scope)
+    cells = {robot_id: Cell(0, index) for index, robot_id in enumerate(robot_ids)}
     solution = ScopedMapfSolution(
         robot_ids=robot_ids,
-        paths={robot_id: (Cell(0, 0),) for robot_id in robot_ids},
+        paths={robot_id: (cells[robot_id],) for robot_id in robot_ids},
         makespan=0,
     )
     return RecoveryProposal(
-        scope_identity=scope,
+        incident_ref=RecoveryIncidentRef(scope[:2], scope, 18),
         expected_plan_versions={robot_id: version for robot_id, version in scope},
-        starts={robot_id: Cell(0, 0) for robot_id in robot_ids},
-        goals={robot_id: Cell(0, 0) for robot_id in robot_ids},
+        starts=cells,
+        goals=cells,
         solution=solution,
-        plans={},
+        plans={
+            robot_id: compile_path(
+                (cells[robot_id],),
+                robot_id=robot_id,
+                plan_version=version + 1,
+                task_id=f"T-{robot_id}",
+            )
+            for robot_id, version in scope
+        },
         metadata=RecoverySolverMetadata(
             solver="pibt", seed=0, max_timestep=1, makespan=0, source_commit="x"
         ),

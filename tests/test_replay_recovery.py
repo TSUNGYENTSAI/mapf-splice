@@ -87,3 +87,35 @@ def test_replay_exposes_cycle_core_and_affected_scope() -> None:
     assert "identity" not in containment
     assert [m["robot_id"] for m in containment["trigger_core"]] == ["R1", "R2", "R3"]
     assert [m["robot_id"] for m in containment["scope"]] == ["R1", "R2", "R3"]
+
+
+def test_replay_exposes_recovery_authority_execution_and_completion() -> None:
+    scenario = load_scenario(SCENARIO)
+    recorder = FrameRecorder(scenario)
+    sim = DeterministicSimulator.from_scenario(scenario, committed_horizon=3)
+    sim.recorder = recorder
+    for _ in range(60):
+        sim.tick()
+        if any(
+            event.kind is EventKind.RECOVERY_COMPLETED
+            for event in sim.trace.events
+        ):
+            break
+    artifact = recorder.artifact(
+        termination_reason="quiescence", final_tick=sim.world.tick
+    )
+    validate_replay(artifact)
+    recoveries = [
+        frame["recovery"] for frame in artifact["frames"] if frame["recovery"]
+    ]
+    admissions = [
+        recovery["admission"]
+        for recovery in recoveries
+        if recovery["admission"]
+    ]
+    assert admissions
+    first = admissions[0]
+    assert first["profile"] == "recovery-adg-bounded-prefix"
+    assert [ref["robot_id"] for ref in first["staged_grants"]] == ["R3", "R3"]
+    assert any(recovery["state"] == "executing" for recovery in recoveries)
+    assert any(recovery["state"] == "completed" for recovery in recoveries)

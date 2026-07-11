@@ -12,7 +12,7 @@ const resourceLabel = r => r.type === 'vertex' ? `V(${cellLabel(r.cell)})` : `E(
 
 const allEvents = frames.flatMap((frame, frameIndex) => frame.events.map(event => ({...event, frameIndex})));
 const bookmarkDefs = [
-  ['Dependency','prospective-dependency'],['Cyclic SCC','prospective-scc-observed'],['Stable SCC','stable-scc-detected'],['Containment','containment-started'],['Quiescence','quiescence-reached'],['Confirmed','confirmed-wait-for-built'],['Hard deadlock','hard-deadlock-confirmed'],['Recovery','recovery-proposal-ready'],['Cleared','containment-cleared'],['Unsupported','confirmation-unsupported']
+  ['Dependency','prospective-dependency'],['Cyclic SCC','prospective-scc-observed'],['Stable SCC','stable-scc-detected'],['Containment','containment-started'],['Quiescence','quiescence-reached'],['Confirmed','confirmed-wait-for-built'],['Hard deadlock','hard-deadlock-confirmed'],['Proposal','recovery-proposal-ready'],['Installed','recovery-install-succeeded'],['Completed','recovery-completed'],['Cleared','containment-cleared'],['Unsupported','confirmation-unsupported']
 ];
 const bookmarks = bookmarkDefs.map(([label,kind]) => ({label,kind,event:allEvents.find(e=>e.kind===kind)})).filter(x=>x.event);
 $('bookmarks').innerHTML = bookmarks.map((b,i)=>`<button data-bookmark="${i}">${b.label} · T${b.event.tick}</button>`).join('');
@@ -88,11 +88,13 @@ function renderConfirmed(frame){
 function renderRecovery(frame){
   const r=frame.recovery;
   if(!r){$('recoveryMeta').textContent='—';$('recovery').innerHTML='<div class="scc"><strong>No recovery</strong>Not attempted on this frame.</div>';return;}
-  if(r.state!=='proposal-ready'){$('recoveryMeta').textContent=r.state;$('recovery').innerHTML=`<div class="scc"><strong>${esc(r.state)}</strong>${esc(r.failure_reason||'—')} · ${esc(r.participants.join(','))}</div>`;return;}
+  if(!['proposal-ready','installed','executing','completed'].includes(r.state)){$('recoveryMeta').textContent=r.state;$('recovery').innerHTML=`<div class="scc"><strong>${esc(r.state)}</strong>${esc(r.failure_reason||'—')} · ${esc(r.participants.join(','))}</div>`;return;}
   const s=r.solver,goals=Object.fromEntries(r.goals.map(g=>[g.robot_id,g.cell])),starts=Object.fromEntries(r.starts.map(g=>[g.robot_id,g.cell]));
   $('recoveryMeta').textContent=`${esc(s.solver)} · makespan ${s.makespan}`;
   const rows=r.participants.map(id=>{const path=r.paths.find(p=>p.robot_id===id);return `<div class="scc"><strong style="color:${robotColor(id)}">${esc(id)}</strong>${cellLabel(starts[id])} → ${cellLabel(goals[id])} · ${path.cells.length-1} steps</div>`}).join('');
-  $('recovery').innerHTML=`<div class="scc"><strong>proposal ready</strong>seed ${s.seed} · max_t ${s.max_timestep} · makespan ${s.makespan} · ADG ${r.adg_compiled?'compiled':'—'}</div>${rows}`;
+  const versions=(r.installed_plan_versions||[]).map(x=>`${x.robot_id}: v${r.expected_plan_versions.find(y=>y.robot_id===x.robot_id)?.plan_version} → v${x.plan_version}`).join(' · ');
+  const admission=r.admission?`<div class="scc"><strong>Authority · ${esc(r.admission.profile)}</strong>K=${r.admission.horizon} · grants ${r.admission.staged_grants.map(x=>esc(x.label)).join(', ')||'none'}<br>${r.admission.robots.map(x=>`${esc(x.robot_id)}: +${x.granted_actions.length}${x.blocked_reason?` · ${esc(x.blocked_reason)}`:''}`).join(' · ')}</div>`:'';
+  $('recovery').innerHTML=`<div class="scc"><strong>${esc(r.state)}</strong>seed ${s.seed} · max_t ${s.max_timestep} · makespan ${s.makespan} · ADG ${r.adg_compiled?'compiled':'—'}<br>${esc(versions||'replacement not installed')}</div>${admission}${rows}`;
 }
 function renderEvents(frame){const robot=$('robotFilter').value,kind=$('kindFilter').value,events=frame.events.filter(e=>(!robot||e.robot_id===robot)&&(!kind||e.kind===kind));$('events').innerHTML=events.map(e=>`<div class="event"><span class="seq">#${e.sequence}</span><span class="phase">${esc(e.phase)}</span><span class="kind">${esc(e.kind)}</span><span>${esc(e.robot_id||'global')} ${esc(e.action_ref?.label||'')} ${esc(JSON.stringify(e.details))}</span></div>`).join('')||'<div class="event empty">No matching events at this checkpoint.</div>';}
 

@@ -37,7 +37,7 @@ def test_confirmed_deadlock_produces_recovery_proposal(horizon: int) -> None:
     sim = _run_to_recovery(horizon)
     containment = sim.deadlock_controller.containment
     assert containment.state is ContainmentState.CONFIRMED_DEADLOCK
-    assert containment.recovery_state is RecoveryState.PROPOSAL_READY
+    assert containment.recovery_state is RecoveryState.INSTALLED
     assert containment.recovery_failure is None
     proposal = containment.recovery_proposal
     assert isinstance(proposal, RecoveryProposal)
@@ -67,4 +67,4 @@ def test_record_recovery_does_not_overwrite_existing_result() -> None:
         RecoveryPlanningFailure(RecoveryFailureReason.SOLVER_NO_SOLUTION, "ignored")
     )
     assert controller.containment.recovery_proposal is original
-    assert controller.containment.recovery_state is RecoveryState.PROPOSAL_READY
+    assert controller.containment.recovery_state is RecoveryState.INSTALLED

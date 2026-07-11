@@ -14,7 +14,15 @@ from mapf_splice.dispatch import dispatch_pending_tasks
 from mapf_splice.domain import Action, ActionStatus, Cell, TaskStatus
 from mapf_splice.planning import next_required_action
 from mapf_splice.preview import PreviewAnalysis, analyze_preview, resource_label
-from mapf_splice.recovery import RecoveryProposal, RecoveryState, plan_recovery
+from mapf_splice.recovery import (
+    ConfirmedRecoveryIncident,
+    RecoveryIncidentRef,
+    RecoveryInstallFailure,
+    RecoveryProposal,
+    RecoveryState,
+    build_recovery_proposal,
+    commit_recovery_splice,
+)
 from mapf_splice.replay import FrameRecorder
 from mapf_splice.routing import NoPath
 from mapf_splice.scenario import ScenarioBundle, WarehouseMap, build_initial_world
@@ -25,6 +33,13 @@ from mapf_splice.tasking import (
     start_pickup_leg,
 )
 from mapf_splice.trace import EventKind, EventTrace, TickPhase
+from mapf_splice.traffic import (
+    RecoveryAdmissionError,
+    RecoveryAdmissionFailure,
+    RecoveryAdmissionFailureReason,
+    RecoveryAdmissionRequest,
+    TrafficError,
+)
 from mapf_splice.world import WorldState, WorldStateError
 
 
@@ -66,9 +81,7 @@ class DeterministicSimulator:
             ),
             base_action_duration_ticks=execution["base_move_duration_ticks"],
             deadlock_controller=DeadlockController(
-                scenario.data["deadlock_analysis"][
-                    "stable_scc_observation_threshold"
-                ]
+                scenario.data["deadlock_analysis"]["stable_scc_observation_threshold"]
             ),
             warehouse_map=scenario.warehouse_map,
         )
@@ -214,6 +227,9 @@ class DeterministicSimulator:
                     task.status is TaskStatus.TO_PICKUP
                     and robot.position == task.pickup
                     and self._plan_complete(self.world, robot_id)
+                    and not self.deadlock_controller.is_executing_recovery_plan(
+                        self.world.plans[robot_id]
+                    )
                 ):
                     plan = self.world.plans[robot_id]
                     self.world.reservations.retire_completed_plan(plan)
@@ -254,6 +270,9 @@ class DeterministicSimulator:
                     task.status is TaskStatus.TO_DROPOFF
                     and robot.position == task.dropoff
                     and self._plan_complete(self.world, robot_id)
+                    and not self.deadlock_controller.is_executing_recovery_plan(
+                        self.world.plans[robot_id]
+                    )
                 ):
                     plan = self.world.plans[robot_id]
                     self.world.reservations.retire_completed_plan(plan)
@@ -277,6 +296,8 @@ class DeterministicSimulator:
                 if not self.world.reservations.plan_initialized(plan):
                     raise WorldStateError("contained plan was not initially admitted")
                 continue
+            if self.deadlock_controller.is_executing_recovery_plan(plan):
+                continue
             plans_list.append(plan)
         plans = tuple(plans_list)
         modes = {
@@ -287,7 +308,7 @@ class DeterministicSimulator:
             )
             for plan in plans
         }
-        decisions = self.world.reservations.admit_batch(
+        decisions = self.world.reservations.admit_normal_batch(
             plans,
             occupied=self.world.occupied_cells(),
         )
@@ -309,6 +330,157 @@ class DeterministicSimulator:
                     ("mode", modes[robot_id]),
                     ("safe_prefix_length", decision.safe_prefix_length),
                 ),
+            )
+        self._admit_recovery()
+
+    def _admit_recovery(self) -> None:
+        containment = self.deadlock_controller.containment
+        if (
+            containment is None
+            or containment.recovery_state
+            not in {RecoveryState.INSTALLED, RecoveryState.EXECUTING}
+            or containment.installed_plan_versions is None
+        ):
+            return
+        participants = tuple(robot_id for robot_id, _ in containment.scope_identity)
+        request = RecoveryAdmissionRequest(
+            containment.recovery_proposal.incident_ref,
+            tuple(sorted(containment.installed_plan_versions.items())),
+            participants,
+            self.world.reservations.horizon,
+            self.world.tick,
+        )
+        proposal = containment.recovery_proposal
+        failure = None
+        try:
+            plans = tuple(self.world.plans[robot_id] for robot_id in participants)
+        except KeyError as error:
+            plans = ()
+            failure = RecoveryAdmissionFailure(
+                RecoveryAdmissionFailureReason.PARTICIPANT_COVERAGE_MISMATCH,
+                f"missing recovery participant {error.args[0]}",
+                self.world.tick,
+            )
+        if failure is None:
+            for plan in plans:
+                robot = self.world.robots.get(plan.robot_id)
+                version = containment.installed_plan_versions[plan.robot_id]
+                spec = proposal.plans[plan.robot_id]
+                if (
+                    robot is None
+                    or robot.plan_version != version
+                    or plan.version != version
+                ):
+                    failure = RecoveryAdmissionFailure(
+                        RecoveryAdmissionFailureReason.STALE_PLAN_VERSION,
+                        f"stale recovery generation for {plan.robot_id}",
+                        self.world.tick,
+                    )
+                    break
+                if plan.task_id != spec.task_id or plan.phase_goal != spec.phase_goal:
+                    failure = RecoveryAdmissionFailure(
+                        RecoveryAdmissionFailureReason.TASK_OR_PHASE_CHANGED,
+                        f"recovery task or phase changed for {plan.robot_id}",
+                        self.world.tick,
+                    )
+                    break
+        if failure is not None:
+            self.deadlock_controller.fail_recovery_admission(failure)
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.APPLY_ADMISSION,
+                kind=EventKind.RECOVERY_ADMISSION_FAILED,
+                details=(("reason", failure.reason.value), ("detail", failure.detail)),
+            )
+            return
+        try:
+            result = self.world.reservations.admit_recovery_group(
+                request, plans, occupied=self.world.occupied_cells()
+            )
+        except RecoveryAdmissionError as error:
+            failure = RecoveryAdmissionFailure(
+                error.reason,
+                error.detail,
+                self.world.tick,
+            )
+            self.deadlock_controller.fail_recovery_admission(failure)
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.APPLY_ADMISSION,
+                kind=EventKind.RECOVERY_ADMISSION_FAILED,
+                details=(("reason", failure.reason.value), ("detail", failure.detail)),
+            )
+            return
+        except TrafficError as error:
+            failure = RecoveryAdmissionFailure(
+                RecoveryAdmissionFailureReason.ATOMIC_PUBLICATION_FAILED,
+                str(error),
+                self.world.tick,
+            )
+            self.deadlock_controller.fail_recovery_admission(failure)
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.APPLY_ADMISSION,
+                kind=EventKind.RECOVERY_ADMISSION_FAILED,
+                details=(("reason", failure.reason.value), ("detail", failure.detail)),
+            )
+            return
+        self.deadlock_controller.record_recovery_admission(result)
+        self.trace.append(
+            tick=self.world.tick,
+            phase=TickPhase.APPLY_ADMISSION,
+            kind=EventKind.RECOVERY_ADMISSION_EVALUATED,
+            details=(
+                ("profile", result.profile.value),
+                (
+                    "evaluation_order",
+                    ",".join(
+                        f"{ref.robot_id}@{ref.plan_version}:{ref.action_index}"
+                        for ref in result.evaluation_order
+                    ),
+                ),
+            ),
+        )
+        for robot in result.robots:
+            if robot.granted_actions:
+                self.trace.append(
+                    tick=self.world.tick,
+                    phase=TickPhase.APPLY_ADMISSION,
+                    kind=EventKind.RECOVERY_PREFIX_GRANTED,
+                    robot_id=robot.robot_id,
+                    details=(
+                        ("granted", len(robot.granted_actions)),
+                        (
+                            "blocked_reason",
+                            robot.blocked_reason.value if robot.blocked_reason else "",
+                        ),
+                    ),
+                )
+        running = any(
+            self.world.robots[robot_id].active_action_ref is not None
+            for robot_id in participants
+        )
+        committed = any(
+            self.world.reservations.committed_actions(
+                robot_id, containment.installed_plan_versions[robot_id]
+            )
+            for robot_id in participants
+        )
+        unfinished = any(
+            any(action.status is not ActionStatus.COMPLETED for action in plan.actions)
+            for plan in plans
+        )
+        if (
+            unfinished
+            and not result.any_new_authority
+            and not running
+            and not committed
+        ):
+            self.deadlock_controller.stall_recovery_admission()
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.APPLY_ADMISSION,
+                kind=EventKind.RECOVERY_ADMISSION_STALLED,
             )
 
     def _start_actions(self) -> None:
@@ -357,6 +529,7 @@ class DeterministicSimulator:
                 action_ref=action.ref,
                 details=(("extra_delay_ticks", extra_ticks),),
             )
+            self.deadlock_controller.record_recovery_action_started(action.ref)
         self.world.validate()
 
     def _preview(self) -> tuple[PreviewAnalysis, DeadlockUpdate]:
@@ -396,12 +569,11 @@ class DeterministicSimulator:
                 phase=TickPhase.PREVIEW,
                 kind=EventKind.PROSPECTIVE_SCC_OBSERVED,
                 details=(
-                    ("members", self._identity_label(
-                        observation.group.trigger_core_identity
-                    )),
-                    ("scope", self._identity_label(
-                        observation.group.scope_identity
-                    )),
+                    (
+                        "members",
+                        self._identity_label(observation.group.trigger_core_identity),
+                    ),
+                    ("scope", self._identity_label(observation.group.scope_identity)),
                     ("observation_count", observation.count),
                 ),
             )
@@ -455,6 +627,7 @@ class DeterministicSimulator:
         self._record("after-completions")
         self._release_completed(due)
         self._record("after-release")
+        self._complete_recovery_if_ready()
         self._advance_tasks()
         self._emit_invalidation(self.deadlock_controller.refresh(self.world))
         self._record("after-task-advance")
@@ -470,6 +643,8 @@ class DeterministicSimulator:
         )
         self._confirm()
         self._record("after-confirmation")
+        self._install_recovery_if_ready()
+        self._record("after-recovery-install")
         self.trace.append(
             tick=self.world.tick,
             phase=TickPhase.ADVANCE_TICK,
@@ -516,9 +691,9 @@ class DeterministicSimulator:
             details=(("members", self._identity_label(result.scope_identity)),),
         )
         if result.outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK:
-            self._attempt_recovery(result.scope_identity)
+            self._attempt_recovery(result)
 
-    def _attempt_recovery(self, scope_identity: CandidateIdentity) -> None:
+    def _attempt_recovery(self, result) -> None:
         """Produce a scoped recovery proposal once, as diagnostic state only.
 
         The full affected containment scope is the MAPF participant set.
@@ -532,9 +707,17 @@ class DeterministicSimulator:
             or containment.recovery_state is not RecoveryState.NOT_ATTEMPTED
         ):
             return
-        outcome = plan_recovery(self.world, scope_identity, self.warehouse_map)
+        incident = ConfirmedRecoveryIncident(
+            RecoveryIncidentRef(
+                result.trigger_core_identity,
+                result.scope_identity,
+                self.world.tick,
+            ),
+            result.graph,
+        )
+        outcome = build_recovery_proposal(self.world, incident, self.warehouse_map)
         self.deadlock_controller.record_recovery(outcome)
-        members = self._identity_label(scope_identity)
+        members = self._identity_label(result.scope_identity)
         if isinstance(outcome, RecoveryProposal):
             self.trace.append(
                 tick=self.world.tick,
@@ -552,11 +735,59 @@ class DeterministicSimulator:
                 tick=self.world.tick,
                 phase=TickPhase.CONFIRM_DEADLOCK,
                 kind=EventKind.RECOVERY_PLANNING_FAILED,
+                details=(("members", members), ("reason", outcome.reason.value)),
+            )
+
+    def _install_recovery_if_ready(self) -> None:
+        containment = self.deadlock_controller.containment
+        if (
+            containment is None
+            or containment.recovery_state is not RecoveryState.PROPOSAL_READY
+        ):
+            return
+        assert containment.recovery_proposal is not None
+        outcome = commit_recovery_splice(
+            self.world,
+            self.deadlock_controller,
+            containment.recovery_proposal,
+            tick=self.world.tick,
+        )
+        if isinstance(outcome, RecoveryInstallFailure):
+            self.deadlock_controller.record_install_failure(
+                outcome, tick=self.world.tick
+            )
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.INSTALL_RECOVERY,
+                kind=EventKind.RECOVERY_INSTALL_FAILED,
+                details=(("reason", outcome.reason.value), ("detail", outcome.detail)),
+            )
+        else:
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.INSTALL_RECOVERY,
+                kind=EventKind.RECOVERY_INSTALL_SUCCEEDED,
                 details=(
-                    ("members", members),
-                    ("reason", outcome.reason.value),
+                    (
+                        "versions",
+                        self._identity_label(
+                            tuple(sorted(outcome.installed_versions.items()))
+                        ),
+                    ),
                 ),
             )
+
+    def _complete_recovery_if_ready(self) -> None:
+        if self.deadlock_controller.complete_recovery_if_done(
+            self.world, tick=self.world.tick
+        ):
+            self.trace.append(
+                tick=self.world.tick,
+                phase=TickPhase.RECOVERY_COMPLETION,
+                kind=EventKind.RECOVERY_COMPLETED,
+            )
+            self._record("after-recovery-completion")
+            self.deadlock_controller.release_completed_recovery()
 
     def _record(
         self,

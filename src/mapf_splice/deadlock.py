@@ -13,10 +13,12 @@ from mapf_splice.confirm import (
 from mapf_splice.domain import ActionStatus, DomainError, Plan
 from mapf_splice.preview import PreviewAnalysis, ProspectiveDependency
 from mapf_splice.recovery import (
+    RecoveryInstallFailure,
     RecoveryPlanningFailure,
     RecoveryProposal,
     RecoveryState,
 )
+from mapf_splice.traffic import RecoveryAdmissionFailure, RecoveryAdmissionResult
 from mapf_splice.world import WorldState
 
 PlanMember = tuple[str, int]
@@ -82,6 +84,13 @@ class Containment:
     recovery_state: RecoveryState = RecoveryState.NOT_ATTEMPTED
     recovery_proposal: RecoveryProposal | None = None
     recovery_failure: RecoveryPlanningFailure | None = None
+    recovery_install_failure: RecoveryInstallFailure | None = None
+    install_failure_tick: int | None = None
+    installed_plan_versions: dict[str, int] | None = None
+    installation_tick: int | None = None
+    completion_tick: int | None = None
+    recovery_admission: RecoveryAdmissionResult | None = None
+    recovery_admission_failure: RecoveryAdmissionFailure | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +127,13 @@ class ContainmentSnapshot:
     recovery_state: RecoveryState
     recovery_proposal: RecoveryProposal | None
     recovery_failure: RecoveryPlanningFailure | None
+    recovery_install_failure: RecoveryInstallFailure | None
+    install_failure_tick: int | None
+    installed_plan_versions: dict[str, int] | None
+    installation_tick: int | None
+    completion_tick: int | None
+    recovery_admission: RecoveryAdmissionResult | None
+    recovery_admission_failure: RecoveryAdmissionFailure | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,8 +188,7 @@ class DeadlockController:
                     stable=(
                         active is not None
                         and group.scope_identity == active.scope_identity
-                        and group.trigger_core_identity
-                        == active.trigger_core_identity
+                        and group.trigger_core_identity == active.trigger_core_identity
                     ),
                 )
                 for group, count in sorted(self._counts.items())
@@ -191,6 +206,17 @@ class DeadlockController:
                     recovery_state=active.recovery_state,
                     recovery_proposal=active.recovery_proposal,
                     recovery_failure=active.recovery_failure,
+                    recovery_install_failure=active.recovery_install_failure,
+                    install_failure_tick=active.install_failure_tick,
+                    installed_plan_versions=(
+                        None
+                        if active.installed_plan_versions is None
+                        else dict(active.installed_plan_versions)
+                    ),
+                    installation_tick=active.installation_tick,
+                    completion_tick=active.completion_tick,
+                    recovery_admission=active.recovery_admission,
+                    recovery_admission_failure=active.recovery_admission_failure,
                 )
             ),
         )
@@ -240,10 +266,7 @@ class DeadlockController:
             count = self._counts.get(group, 0) + 1
             self._counts[group] = count
             observations.append(SccObservation(group, count, current[group]))
-            if (
-                self._active is None
-                and count >= self.stable_scc_observation_threshold
-            ):
+            if self._active is None and count >= self.stable_scc_observation_threshold:
                 self._active = Containment(
                     trigger_core_identity=group.trigger_core_identity,
                     scope_identity=group.scope_identity,
@@ -263,12 +286,19 @@ class DeadlockController:
         active = self._active
         if active is None:
             return None
+        expected = (
+            active.installed_plan_versions
+            if active.recovery_state
+            in {RecoveryState.INSTALLED, RecoveryState.EXECUTING}
+            and active.installed_plan_versions is not None
+            else dict(active.scope_identity)
+        )
         if any(
             robot_id not in world.robots
             or world.robots[robot_id].plan_version != version
             or robot_id not in world.plans
             or world.plans[robot_id].version != version
-            for robot_id, version in active.scope_identity
+            for robot_id, version in expected.items()
         ):
             self._release()
             return active.scope_identity
@@ -278,7 +308,19 @@ class DeadlockController:
         active = self._active
         return (
             active is not None
+            and active.recovery_state
+            not in {RecoveryState.INSTALLED, RecoveryState.EXECUTING}
             and (plan.robot_id, plan.version) in active.scope_identity
+        )
+
+    def is_executing_recovery_plan(self, plan: Plan) -> bool:
+        active = self._active
+        return (
+            active is not None
+            and active.recovery_state
+            in {RecoveryState.INSTALLED, RecoveryState.EXECUTING}
+            and active.installed_plan_versions is not None
+            and active.installed_plan_versions.get(plan.robot_id) == plan.version
         )
 
     def newly_quiescent(self, world: WorldState) -> tuple[CandidateIdentity, ...]:
@@ -300,9 +342,7 @@ class DeadlockController:
                 or robot.active_action_ref is not None
                 or world.reservations.committed_actions(robot_id, version)
                 or plan is None
-                or any(
-                    action.status is ActionStatus.RUNNING for action in plan.actions
-                )
+                or any(action.status is ActionStatus.RUNNING for action in plan.actions)
             ):
                 return False
         return True
@@ -358,15 +398,144 @@ class DeadlockController:
         ):
             return
         if isinstance(result, RecoveryProposal):
-            if result.scope_identity != active.scope_identity:
+            if active.confirmation_tick is None:
                 raise DomainError(
-                    "recovery proposal scope does not match active containment scope"
+                    "confirmed recovery incident has no confirmation tick"
+                )
+            expected_ref = (
+                active.trigger_core_identity,
+                active.scope_identity,
+                active.confirmation_tick,
+            )
+            actual_ref = (
+                result.incident_ref.trigger_core_identity,
+                result.incident_ref.scope_identity,
+                result.incident_ref.confirmation_tick,
+            )
+            if actual_ref != expected_ref:
+                raise DomainError(
+                    "recovery proposal incident does not match active incident"
+                )
+            if dict(result.expected_plan_versions) != dict(active.scope_identity):
+                raise DomainError(
+                    "recovery proposal versions do not match active containment scope"
                 )
             active.recovery_proposal = result
             active.recovery_state = RecoveryState.PROPOSAL_READY
         else:
             active.recovery_failure = result
             active.recovery_state = RecoveryState.UNSUPPORTED_OR_FAILED
+
+    def record_install_success(self, versions: Mapping[str, int], *, tick: int) -> None:
+        active = self._active
+        if active is None or active.recovery_state is not RecoveryState.PROPOSAL_READY:
+            raise DomainError("recovery installation is not proposal-ready")
+        expected = {
+            robot_id: version + 1 for robot_id, version in active.scope_identity
+        }
+        if dict(versions) != expected:
+            raise DomainError("installed recovery versions do not match scope")
+        active.installed_plan_versions = dict(versions)
+        active.installation_tick = tick
+        active.recovery_state = RecoveryState.INSTALLED
+
+    def record_recovery_admission(self, result: RecoveryAdmissionResult) -> None:
+        active = self._active
+        if active is None or active.recovery_state not in {
+            RecoveryState.INSTALLED,
+            RecoveryState.EXECUTING,
+        }:
+            raise DomainError("recovery admission is not active")
+        active.recovery_admission = result
+
+    def record_recovery_action_started(self, action_ref) -> bool:
+        active = self._active
+        if (
+            active is None
+            or active.installed_plan_versions is None
+            or active.installed_plan_versions.get(action_ref.robot_id)
+            != action_ref.plan_version
+        ):
+            return False
+        if active.recovery_state is RecoveryState.INSTALLED:
+            active.recovery_state = RecoveryState.EXECUTING
+            return True
+        return active.recovery_state is RecoveryState.EXECUTING
+
+    def stall_recovery_admission(self) -> None:
+        active = self._active
+        if active is None or active.recovery_state not in {
+            RecoveryState.INSTALLED,
+            RecoveryState.EXECUTING,
+        }:
+            raise DomainError("recovery admission cannot stall")
+        active.recovery_state = RecoveryState.ADMISSION_STALLED
+
+    def fail_recovery_admission(self, failure: RecoveryAdmissionFailure) -> None:
+        active = self._active
+        if active is None or active.recovery_state not in {
+            RecoveryState.INSTALLED,
+            RecoveryState.EXECUTING,
+        }:
+            raise DomainError("recovery admission cannot fail")
+        active.recovery_admission_failure = failure
+        active.recovery_state = RecoveryState.ADMISSION_FAILED
+
+    def record_install_failure(
+        self, failure: RecoveryInstallFailure, *, tick: int
+    ) -> None:
+        active = self._active
+        if active is None or active.recovery_state is not RecoveryState.PROPOSAL_READY:
+            raise DomainError("recovery installation is not proposal-ready")
+        active.recovery_install_failure = failure
+        active.install_failure_tick = tick
+        active.recovery_state = RecoveryState.INSTALL_FAILED
+
+    def complete_recovery_if_done(self, world: WorldState, *, tick: int) -> bool:
+        active = self._active
+        if active is None or active.recovery_state not in {
+            RecoveryState.INSTALLED,
+            RecoveryState.EXECUTING,
+        }:
+            return False
+        assert active.installed_plan_versions is not None
+        proposal = active.recovery_proposal
+        if proposal is None:
+            return False
+        for robot_id, version in active.installed_plan_versions.items():
+            robot = world.robots.get(robot_id)
+            plan = world.plans.get(robot_id)
+            spec = proposal.plans.get(robot_id)
+            if (
+                robot is None
+                or plan is None
+                or spec is None
+                or robot.plan_version != version
+                or plan.version != version
+                or plan.robot_id != robot_id
+                or plan.task_id != spec.task_id
+                or plan.phase_goal != spec.phase_goal
+                or robot.position != proposal.goals[robot_id]
+                or robot.active_action_ref is not None
+                or robot.remaining_ticks != 0
+                or world.reservations.committed_actions(robot_id, version)
+                or any(action.status is ActionStatus.RUNNING for action in plan.actions)
+                or any(
+                    action.status is not ActionStatus.COMPLETED
+                    for action in plan.actions
+                )
+            ):
+                return False
+        active.completion_tick = tick
+        active.recovery_state = RecoveryState.COMPLETED
+        return True
+
+    def release_completed_recovery(self) -> None:
+        if (
+            self._active is not None
+            and self._active.recovery_state is RecoveryState.COMPLETED
+        ):
+            self._release()
 
     def _release(self) -> None:
         self._active = None

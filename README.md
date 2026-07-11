@@ -16,6 +16,14 @@ robot fleets that already use independent routing and traffic rules:
    (ADG) that remains safe when robots execute at different speeds.
 6. Replace the affected live plans and resume continuous operation.
 
+Recovery authority is intentionally separate from normal traffic authority.
+Normal plans retain atomic K-cell cruise admission. Exact controller-owned
+recovery generations use a low-speed ADG bounded-prefix profile: same-robot
+prefixes may be staged contiguously, cross-robot predecessors must already be
+completed, and all grants in a phase publish atomically. This assumes the
+vehicle controller can stop at every recovery action boundary; hardware braking
+is outside the simulator's safety claim.
+
 The goal is not to replace a fleet management system with a lifelong MAPF
 solver. The goal is to show how MAPF can be introduced as a focused recovery
 mechanism without discarding an existing task, routing, and traffic stack.

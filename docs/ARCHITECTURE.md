@@ -290,19 +290,42 @@ Coordinates the transition from normal traffic to scoped MAPF recovery:
 3. Stop extending normal-route droplets for those robots.
 4. Let already authorized progress reach a well-defined quiescent state.
 5. Recompute required claims and confirm a hard reservation deadlock.
-6. Release their unexecuted future reservations while preserving actual
-   occupancy.
-7. Snapshot current positions, current phase goals, and relevant obstacles.
+6. Snapshot current positions, current phase goals, and relevant obstacles.
 8. Call the MAPF adapter.
 9. Reject invalid or unsupported solutions.
 10. Compile valid paths into dependency-aware actions.
-11. Increment plan versions and replace remaining plans atomically.
-12. Return the robots to normal admission and execution.
+10. Bind the proposal to immutable trigger-core, affected-scope, and
+   confirmation-tick evidence.
+11. Revalidate quiescence, task phase, versions, starts, and ADG, then replace
+   every remaining phase route atomically.
+12. Present the replacement ADG plans to ordinary admission and asynchronous
+   execution; record completion before task-phase advancement. Atomic K-cell
+   initial admission currently rejects the hero recovery group: R1's first
+   action awaits R2's first action, R2's awaits R3's, while R3's third action
+   awaits R1's second action. The ADG would serialize these moves, but each
+   independent initial K=3 request reserves future resources without using
+   those dependencies as admission authority.
+
+The executable milestone selects Option B explicitly:
+`RECOVERY_ADG_BOUNDED_PREFIX` is a low-speed action-boundary-stoppable profile,
+distinct from atomic `NORMAL_K_CRUISE`. It scans participants in deterministic
+prefix layers, permits 0..K contiguous actions per robot, requires cross-robot
+predecessors to be completed, and publishes the phase's grants atomically.
+Normal admission remains unchanged. This software policy assumes the vehicle
+controller can stop at every action boundary under the selected recovery speed;
+the repository does not implement or prove physical braking.
+
+In the current lifecycle, `INSTALLED` means the replacement generation is
+eligible to request recovery admission; `EXECUTING` begins only when a recovery
+action actually starts. Exact installed robot/Plan versions, task,
+phase, action state, remaining progress, and reservations are revalidated before
+recording `COMPLETED`. A stale generation is not completed and is subsequently
+invalidated by the controller's normal refresh policy.
 
 Plan splice is a group transaction, not a loop of single-robot installs. Before
 any mutation, recovery stages the complete affected set, expected current plan
-versions, validated replacement plans, future reservations to release, and
-occupancies that must be preserved. It then validates every version, plan
+versions, validated replacement plans, and occupancies that must be preserved.
+It then validates every version, plan
 start, ADG, and reservation change before committing the whole set as one state
 transition. Failure leaves every robot, version, occupancy, and reservation
 unchanged; a failed candidate consumes no plan version.
@@ -328,13 +351,16 @@ goal is reached before returning project-owned types. A timeout or goals-not-
 reached result is `solver-did-not-find-supported-solution`; it does not prove
 the instance is unsatisfiable, and no fallback solver is attempted.
 
-Scoped recovery is staged read-only. In this milestone `recovery.plan_recovery`
-produces and validates a `RecoveryProposal` — the confirmed containment scope as
+`build_recovery_proposal` is staged read-only and produces a
+`RecoveryProposal` bound to one immutable `RecoveryIncidentRef` (trigger core,
+affected scope, confirmation tick) — the confirmed containment scope as
 the agent set (the cyclic core only triggers recovery), authoritative quiescent
 starts, current task-phase goals, PIBT paths re-checked by a solver-independent
 validator, and new-version ADG plans compiled through `compile_adg`. It never
-installs plans, changes versions, or mutates reservations; atomic versioned plan
-replacement is the next milestone.
+installs plans, changes versions, or mutates reservations. `commit_recovery_splice`
+clones and validates the whole group before WorldState publishes the version
+transition in one aggregate swap. The old suffix is discarded, never appended or
+rejoined; task identity, payload, phase, position, and occupancy are preserved.
 
 ### ADG compiler and executor
 
@@ -392,15 +418,17 @@ The normal execution tick is fixed as:
 2. validate the entire completion batch from one snapshot;
 3. atomically apply position transfers and action completion;
 4. release completed reservations;
-5. advance task phases, dispatch, and install phase plans;
-6. collect initial and rolling admission requests;
-7. batch-admit them with explicit robot-ID arbitration;
-8. collect eligible starts from one snapshot;
-9. start every validated action;
-10. generate read-only preview evidence;
-11. confirm a quiescent containment into the confirmed wait-for graph;
-12. append events in deterministic order;
-13. advance the tick.
+5. detect recovery completion, record the conditional completed checkpoint,
+   then release the completed incident;
+6. advance task phases, dispatch, and install phase plans;
+7. collect initial and rolling admission requests;
+8. batch-admit them with explicit robot-ID arbitration;
+9. collect eligible starts from one snapshot;
+10. start every validated action;
+11. generate read-only preview evidence;
+12. confirm a quiescent containment into the confirmed wait-for graph;
+13. append events in deterministic order;
+14. advance the tick.
 
 While a move runs, the robot position remains the action source and its edge
 and target claims stay committed. Completion alone transfers position to the

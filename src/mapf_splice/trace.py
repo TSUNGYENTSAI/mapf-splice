@@ -18,8 +18,10 @@ class TickPhase(IntEnum):
     START_ACTIONS = 9
     PREVIEW = 10
     CONFIRM_DEADLOCK = 11
-    APPEND_EVENTS = 12
-    ADVANCE_TICK = 13
+    INSTALL_RECOVERY = 12
+    RECOVERY_COMPLETION = 13
+    APPEND_EVENTS = 14
+    ADVANCE_TICK = 15
 
 
 class EventKind(StrEnum):
@@ -46,6 +48,13 @@ class EventKind(StrEnum):
     CONTAINMENT_INVALIDATED = "containment-invalidated"
     RECOVERY_PROPOSAL_READY = "recovery-proposal-ready"
     RECOVERY_PLANNING_FAILED = "recovery-planning-failed"
+    RECOVERY_INSTALL_SUCCEEDED = "recovery-install-succeeded"
+    RECOVERY_INSTALL_FAILED = "recovery-install-failed"
+    RECOVERY_ADMISSION_EVALUATED = "recovery-admission-evaluated"
+    RECOVERY_PREFIX_GRANTED = "recovery-prefix-granted"
+    RECOVERY_ADMISSION_FAILED = "recovery-admission-failed"
+    RECOVERY_ADMISSION_STALLED = "recovery-admission-stalled"
+    RECOVERY_COMPLETED = "recovery-completed"
     TICK_ADVANCED = "tick-advanced"
 
 

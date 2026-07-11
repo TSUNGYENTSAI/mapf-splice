@@ -3,13 +3,16 @@ import pytest
 
 pytest.importorskip("numpy")
 
+from mapf_splice.confirm import ConfirmedWaitForGraph  # noqa: E402
 from mapf_splice.domain import Cell, Robot, Task, TaskStatus  # noqa: E402
 from mapf_splice.planning import compile_path  # noqa: E402
 from mapf_splice.recovery import (  # noqa: E402
+    ConfirmedRecoveryIncident,
     RecoveryFailureReason,
+    RecoveryIncidentRef,
     RecoveryPlanningFailure,
     RecoveryProposal,
-    plan_recovery,
+    build_recovery_proposal,
 )
 from mapf_splice.scenario import WarehouseMap  # noqa: E402
 from mapf_splice.traffic import CommittedReservationLedger  # noqa: E402
@@ -66,12 +69,22 @@ def _snapshot(world: WorldState):
     )
 
 
+def _incident(identity, *, tick=0, core=None):
+    core = core or identity
+    return ConfirmedRecoveryIncident(
+        RecoveryIncidentRef(core, identity, tick),
+        ConfirmedWaitForGraph(
+            identity, tick, (), (tuple(robot_id for robot_id, _ in core),)
+        ),
+    )
+
+
 def test_plan_recovery_produces_proposal_reaching_goals() -> None:
     world = _dropoff_world(
         {"R1": (Cell(0, 0), Cell(0, 4)), "R2": (Cell(2, 0), Cell(2, 4))}
     )
     identity = (("R1", 2), ("R2", 2))
-    result = plan_recovery(world, identity, OPEN)
+    result = build_recovery_proposal(world, _incident(identity), OPEN)
     assert isinstance(result, RecoveryProposal)
     assert result.scope_identity == identity
     assert result.expected_plan_versions == {"R1": 2, "R2": 2}
@@ -90,7 +103,8 @@ def test_plan_recovery_is_read_only() -> None:
         {"R1": (Cell(0, 0), Cell(0, 4)), "R2": (Cell(2, 0), Cell(2, 4))}
     )
     before = _snapshot(world)
-    plan_recovery(world, (("R1", 2), ("R2", 2)), OPEN)
+    identity = (("R1", 2), ("R2", 2))
+    build_recovery_proposal(world, _incident(identity), OPEN)
     assert _snapshot(world) == before
 
 
@@ -103,7 +117,8 @@ def test_active_robot_outside_scope_is_unsupported() -> None:
         }
     )
     # scope omits the still-active R3
-    result = plan_recovery(world, (("R1", 2), ("R2", 2)), OPEN)
+    identity = (("R1", 2), ("R2", 2))
+    result = build_recovery_proposal(world, _incident(identity), OPEN)
     assert isinstance(result, RecoveryPlanningFailure)
     assert result.reason is RecoveryFailureReason.UNSUPPORTED_SCOPE
 
@@ -112,7 +127,8 @@ def test_shared_phase_goal_is_duplicate_goal() -> None:
     world = _dropoff_world(
         {"R1": (Cell(0, 0), Cell(0, 4)), "R2": (Cell(2, 0), Cell(0, 4))}
     )
-    result = plan_recovery(world, (("R1", 2), ("R2", 2)), OPEN)
+    identity = (("R1", 2), ("R2", 2))
+    result = build_recovery_proposal(world, _incident(identity), OPEN)
     assert isinstance(result, RecoveryPlanningFailure)
     assert result.reason is RecoveryFailureReason.DUPLICATE_GOAL
 
@@ -121,7 +137,8 @@ def test_stale_plan_version_in_scope_is_unsupported() -> None:
     world = _dropoff_world(
         {"R1": (Cell(0, 0), Cell(0, 4)), "R2": (Cell(2, 0), Cell(2, 4))}
     )
-    result = plan_recovery(world, (("R1", 1), ("R2", 2)), OPEN)
+    identity = (("R1", 1), ("R2", 2))
+    result = build_recovery_proposal(world, _incident(identity), OPEN)
     assert isinstance(result, RecoveryPlanningFailure)
     assert result.reason is RecoveryFailureReason.UNSUPPORTED_SCOPE
 
@@ -161,7 +178,14 @@ def test_recovery_receives_full_affected_scope_not_just_core() -> None:
     assert containment.trigger_core_identity == (("R1", 2), ("R2", 2))
     assert containment.scope_identity == (("R1", 2), ("R2", 2), ("R3", 2))
 
-    result = plan_recovery(world, containment.scope_identity, OPEN)
+    result = build_recovery_proposal(
+        world,
+        _incident(
+            containment.scope_identity,
+            core=containment.trigger_core_identity,
+        ),
+        OPEN,
+    )
     assert isinstance(result, RecoveryProposal)
     assert result.scope_identity == (("R1", 2), ("R2", 2), ("R3", 2))
     assert set(result.plans) == {"R1", "R2", "R3"}

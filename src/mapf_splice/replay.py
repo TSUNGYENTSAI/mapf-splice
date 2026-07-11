@@ -26,11 +26,13 @@ CHECKPOINTS = (
     "tick-start",
     "after-completions",
     "after-release",
+    "after-recovery-completion",
     "after-task-advance",
     "after-admission",
     "after-action-start",
     "after-preview",
     "after-confirmation",
+    "after-recovery-install",
 )
 
 
@@ -110,11 +112,89 @@ def _recovery(containment) -> dict[str, Any] | None:
     if containment is None or containment.recovery_state is RecoveryState.NOT_ATTEMPTED:
         return None
     proposal = containment.recovery_proposal
+    admission_failure = containment.recovery_admission_failure
+    admission = containment.recovery_admission
+    admission_data = None
+    if admission is not None:
+        admission_data = {
+            "profile": admission.profile.value,
+            "incident": {
+                "trigger_core": _identity(
+                    admission.request.incident_ref.trigger_core_identity
+                ),
+                "scope": _identity(admission.request.incident_ref.scope_identity),
+                "confirmation_tick": admission.request.incident_ref.confirmation_tick,
+            },
+            "tick": admission.request.tick,
+            "horizon": admission.request.horizon,
+            "participants": list(admission.request.participants),
+            "evaluation_order": [_ref(ref) for ref in admission.evaluation_order],
+            "staged_grants": [_ref(ref) for ref in admission.staged_grants],
+            "published": admission.published,
+            "robots": [
+                {
+                    "robot_id": robot.robot_id,
+                    "plan_version": robot.plan_version,
+                    "completed_prefix_length": robot.completed_prefix_length,
+                    "existing_committed_prefix": [
+                        _ref(ref) for ref in robot.existing_committed_prefix
+                    ],
+                    "remaining_capacity": robot.remaining_capacity,
+                    "candidate_frontier_index": robot.candidate_frontier_index,
+                    "evaluated_actions": [
+                        _ref(ref) for ref in robot.evaluated_actions
+                    ],
+                    "granted_actions": [_ref(ref) for ref in robot.granted_actions],
+                    "first_blocked_action": _ref(robot.first_blocked_action),
+                    "blocked_reason": (
+                        robot.blocked_reason.value if robot.blocked_reason else None
+                    ),
+                    "resulting_committed_prefix_length": (
+                        robot.resulting_committed_prefix_length
+                    ),
+                }
+                for robot in admission.robots
+            ],
+        }
     if proposal is not None:
         participants = sorted(proposal.plans)
         return {
             "state": containment.recovery_state.value,
-            "failure_reason": None,
+            "failure_reason": (
+                admission_failure.reason.value
+                if admission_failure
+                else (
+                    containment.recovery_install_failure.reason.value
+                    if containment.recovery_install_failure
+                    else None
+                )
+            ),
+            "failure_detail": (
+                admission_failure.detail
+                if admission_failure
+                else (
+                    containment.recovery_install_failure.detail
+                    if containment.recovery_install_failure
+                    else None
+                )
+            ),
+            "failure_tick": (
+                admission_failure.tick
+                if admission_failure
+                else containment.install_failure_tick
+            ),
+            "incident": {
+                "trigger_core": _identity(proposal.incident_ref.trigger_core_identity),
+                "scope": _identity(proposal.incident_ref.scope_identity),
+                "confirmation_tick": proposal.incident_ref.confirmation_tick,
+            },
+            "expected_plan_versions": _identity(proposal.scope_identity),
+            "installed_plan_versions": _identity(
+                tuple(sorted((containment.installed_plan_versions or {}).items()))
+            ),
+            "proposal_created_tick": proposal.incident_ref.confirmation_tick,
+            "installation_tick": containment.installation_tick,
+            "completion_tick": containment.completion_tick,
             "participants": participants,
             "starts": [
                 {"robot_id": r, "cell": _cell(proposal.starts[r])}
@@ -139,17 +219,29 @@ def _recovery(containment) -> dict[str, Any] | None:
                 }
                 for r in participants
             ],
+            "admission": admission_data,
         }
     failure = containment.recovery_failure
     return {
         "state": containment.recovery_state.value,
         "failure_reason": failure.reason.value if failure else None,
+        "failure_detail": failure.detail if failure else None,
+        "failure_tick": containment.install_failure_tick,
+        "incident": None,
+        "expected_plan_versions": [],
+        "installed_plan_versions": _identity(
+            tuple(sorted((containment.installed_plan_versions or {}).items()))
+        ),
+        "proposal_created_tick": None,
+        "installation_tick": containment.installation_tick,
+        "completion_tick": containment.completion_tick,
         "participants": [robot_id for robot_id, _ in containment.scope_identity],
         "starts": [],
         "goals": [],
         "solver": None,
         "adg_compiled": False,
         "paths": [],
+        "admission": admission_data,
     }
 
 

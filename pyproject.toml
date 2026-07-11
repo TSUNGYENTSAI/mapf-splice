@@ -43,7 +43,7 @@ packages = ["src/mapf_splice"]
 "src/mapf_splice/_vendor/pypibt/PROVENANCE.md" = "mapf_splice/_vendor/pypibt/PROVENANCE.md"
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "schemas", "tests", "tools", "README.md", "LICENSE", "pyproject.toml"]
+include = ["src", "schemas", "docs", "tests", "tools", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
