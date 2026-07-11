@@ -396,30 +396,43 @@ class DeterministicSimulator:
                 phase=TickPhase.PREVIEW,
                 kind=EventKind.PROSPECTIVE_SCC_OBSERVED,
                 details=(
-                    ("members", self._identity_label(observation.identity)),
+                    ("members", self._identity_label(
+                        observation.group.trigger_core_identity
+                    )),
+                    ("scope", self._identity_label(
+                        observation.group.scope_identity
+                    )),
                     ("observation_count", observation.count),
                 ),
             )
-        for identity in update.stable:
-            details = (("members", self._identity_label(identity)),)
+        for group in update.stable:
             self.trace.append(
                 tick=self.world.tick,
                 phase=TickPhase.PREVIEW,
                 kind=EventKind.STABLE_SCC_DETECTED,
-                details=details,
+                details=(
+                    ("members", self._identity_label(group.trigger_core_identity)),
+                    ("scope", self._identity_label(group.scope_identity)),
+                ),
             )
             self.trace.append(
                 tick=self.world.tick,
                 phase=TickPhase.PREVIEW,
                 kind=EventKind.CONTAINMENT_STARTED,
-                details=details,
+                details=(
+                    ("members", self._identity_label(group.scope_identity)),
+                    ("cycle_core", self._identity_label(group.trigger_core_identity)),
+                ),
             )
-        for identity in update.expired:
+        for group in update.expired:
             self.trace.append(
                 tick=self.world.tick,
                 phase=TickPhase.PREVIEW,
                 kind=EventKind.CANDIDATE_EXPIRED,
-                details=(("members", self._identity_label(identity)),),
+                details=(
+                    ("members", self._identity_label(group.trigger_core_identity)),
+                    ("scope", self._identity_label(group.scope_identity)),
+                ),
             )
         for identity in self.deadlock_controller.newly_quiescent(self.world):
             self.trace.append(
@@ -490,7 +503,8 @@ class DeterministicSimulator:
             phase=TickPhase.CONFIRM_DEADLOCK,
             kind=EventKind.CONFIRMED_WAIT_FOR_BUILT,
             details=(
-                ("members", self._identity_label(result.identity)),
+                ("members", self._identity_label(result.scope_identity)),
+                ("cycle_core", self._identity_label(result.trigger_core_identity)),
                 ("outcome", result.outcome.value),
                 ("edges", len(result.graph.edges)),
             ),
@@ -499,14 +513,15 @@ class DeterministicSimulator:
             tick=self.world.tick,
             phase=TickPhase.CONFIRM_DEADLOCK,
             kind=self._OUTCOME_EVENTS[result.outcome],
-            details=(("members", self._identity_label(result.identity)),),
+            details=(("members", self._identity_label(result.scope_identity)),),
         )
         if result.outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK:
-            self._attempt_recovery(result.identity)
+            self._attempt_recovery(result.scope_identity)
 
-    def _attempt_recovery(self, identity: CandidateIdentity) -> None:
+    def _attempt_recovery(self, scope_identity: CandidateIdentity) -> None:
         """Produce a scoped recovery proposal once, as diagnostic state only.
 
+        The full affected containment scope is the MAPF participant set.
         Proposal-only: this never installs plans, changes versions, or mutates
         reservations. A missing map or an already-attempted incident is skipped.
         """
@@ -517,9 +532,9 @@ class DeterministicSimulator:
             or containment.recovery_state is not RecoveryState.NOT_ATTEMPTED
         ):
             return
-        outcome = plan_recovery(self.world, identity, self.warehouse_map)
+        outcome = plan_recovery(self.world, scope_identity, self.warehouse_map)
         self.deadlock_controller.record_recovery(outcome)
-        members = self._identity_label(identity)
+        members = self._identity_label(scope_identity)
         if isinstance(outcome, RecoveryProposal):
             self.trace.append(
                 tick=self.world.tick,

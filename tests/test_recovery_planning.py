@@ -73,7 +73,7 @@ def test_plan_recovery_produces_proposal_reaching_goals() -> None:
     identity = (("R1", 2), ("R2", 2))
     result = plan_recovery(world, identity, OPEN)
     assert isinstance(result, RecoveryProposal)
-    assert result.identity == identity
+    assert result.scope_identity == identity
     assert result.expected_plan_versions == {"R1": 2, "R2": 2}
     assert result.starts == {"R1": Cell(0, 0), "R2": Cell(2, 0)}
     assert result.goals == {"R1": Cell(0, 4), "R2": Cell(2, 4)}

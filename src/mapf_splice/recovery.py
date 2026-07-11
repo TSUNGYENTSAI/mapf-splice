@@ -95,9 +95,13 @@ class RecoverySolverMetadata:
 
 @dataclass(frozen=True, slots=True)
 class RecoveryProposal:
-    """A validated, not-yet-installed scoped MAPF recovery for a confirmed deadlock."""
+    """A validated, not-yet-installed scoped MAPF recovery for a confirmed deadlock.
 
-    identity: tuple[tuple[str, int], ...]
+    ``scope_identity`` is the full affected containment scope (the MAPF
+    participant set), not merely the cyclic trigger core.
+    """
+
+    scope_identity: tuple[tuple[str, int], ...]
     expected_plan_versions: dict[str, int]
     starts: dict[str, Cell]
     goals: dict[str, Cell]
@@ -185,7 +189,7 @@ def validate_synchronized_solution(
 
 def plan_recovery(
     world: WorldState,
-    identity: tuple[tuple[str, int], ...],
+    scope_identity: tuple[tuple[str, int], ...],
     warehouse_map: WarehouseMap,
     *,
     seed: int = DEFAULT_RECOVERY_SEED,
@@ -193,19 +197,21 @@ def plan_recovery(
 ) -> RecoveryProposal | RecoveryPlanningFailure:
     """Produce and validate a scoped MAPF recovery proposal (read-only).
 
-    Never mutates world state, never installs plans, and never changes plan
-    versions or reservations. Returns a validated, not-yet-installed
+    ``scope_identity`` is the full affected containment scope; the MAPF
+    participant set equals it. This function does not rediscover or expand the
+    scope. It never mutates world state, installs plans, or changes plan
+    versions or reservations, and returns a validated, not-yet-installed
     RecoveryProposal or a typed RecoveryPlanningFailure. The PyPIBT adapter is
     imported lazily here to keep the module import cycle-free and NumPy-free.
     """
     from mapf_splice.mapf_pibt import solve
 
-    scope_ids = tuple(sorted(robot_id for robot_id, _ in identity))
-    expected_versions = {robot_id: version for robot_id, version in identity}
+    scope_ids = tuple(sorted(robot_id for robot_id, _ in scope_identity))
+    expected_versions = {robot_id: version for robot_id, version in scope_identity}
 
     # v0.1 supported boundary: every scope member is current, and the scope is
     # exactly the set of all currently active robots (no non-participant robot).
-    for robot_id, version in identity:
+    for robot_id, version in scope_identity:
         robot = world.robots.get(robot_id)
         plan = world.plans.get(robot_id)
         if (
@@ -282,7 +288,7 @@ def plan_recovery(
         )
 
     return RecoveryProposal(
-        identity=identity,
+        scope_identity=scope_identity,
         expected_plan_versions=expected_versions,
         starts=starts,
         goals=goals,

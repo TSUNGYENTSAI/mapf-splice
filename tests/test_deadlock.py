@@ -66,11 +66,12 @@ def test_stability_requires_consecutive_observations() -> None:
     assert first.observations[0].count == 1
     assert first.stable == ()
     assert second.observations[0].count == 2
-    assert second.stable == ((("R1", 1), ("R2", 1)),)
+    assert second.stable[0].trigger_core_identity == (("R1", 1), ("R2", 1))
+    assert second.stable[0].scope_identity == (("R1", 1), ("R2", 1))
     assert controller.observe(cycle, versions).stable == ()
     assert controller.containment is not None
     immediate = DeadlockController(1).observe(cycle, versions)
-    assert immediate.stable == ((("R1", 1), ("R2", 1)),)
+    assert immediate.stable[0].scope_identity == (("R1", 1), ("R2", 1))
 
 
 def test_disappearance_membership_and_plan_version_reset_candidates() -> None:
@@ -84,15 +85,18 @@ def test_disappearance_membership_and_plan_version_reset_candidates() -> None:
     controller.observe(two, {"R1": 1, "R2": 1})
 
     disappeared = controller.observe(PreviewAnalysis((), ()), {"R1": 1, "R2": 1})
-    assert disappeared.expired == ((("R1", 1), ("R2", 1)),)
+    assert [g.scope_identity for g in disappeared.expired] == [(("R1", 1), ("R2", 1))]
     assert controller.observe(two, {"R1": 1, "R2": 1}).observations[0].count == 1
 
     changed = controller.observe(three, {"R1": 1, "R2": 1, "R3": 1})
-    assert (("R1", 1), ("R2", 1)) in changed.expired
+    assert any(g.scope_identity == (("R1", 1), ("R2", 1)) for g in changed.expired)
     assert changed.observations[0].count == 1
 
     versioned = controller.observe(three, {"R1": 2, "R2": 1, "R3": 1})
-    assert (("R1", 1), ("R2", 1), ("R3", 1)) in versioned.expired
+    assert any(
+        g.scope_identity == (("R1", 1), ("R2", 1), ("R3", 1))
+        for g in versioned.expired
+    )
     assert versioned.observations[0].count == 1
 
 
@@ -450,7 +454,8 @@ def test_active_incident_freezes_candidate_accumulation() -> None:
     )
     assert update.observations == ()
     assert update.stable == ()
-    assert controller.containment.identity == (("R1", 1), ("R2", 1))
+    assert controller.containment.scope_identity == (("R1", 1), ("R2", 1))
+    assert controller.containment.trigger_core_identity == (("R1", 1), ("R2", 1))
 
 
 def test_classify_confirmation_prefers_internal_cycle() -> None:

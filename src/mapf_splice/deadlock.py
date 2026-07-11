@@ -6,6 +6,7 @@ from enum import StrEnum
 
 from mapf_splice.confirm import (
     ConfirmedWaitForGraph,
+    affected_scope,
     build_confirmed_wait_for,
     cyclic_components,
 )
@@ -20,6 +21,20 @@ from mapf_splice.world import WorldState
 
 PlanMember = tuple[str, int]
 CandidateIdentity = tuple[PlanMember, ...]
+
+
+@dataclass(frozen=True, order=True, slots=True)
+class ProspectiveDeadlockGroup:
+    """A prospective incident candidate with distinct core and scope.
+
+    ``trigger_core_identity`` is the plan-version-scoped cyclic SCC that triggers
+    the incident. ``scope_identity`` is the plan-version-scoped upstream blocked
+    closure (the affected containment/recovery scope), a superset of the core.
+    Both drive candidate stability; concrete evidence does not.
+    """
+
+    trigger_core_identity: CandidateIdentity
+    scope_identity: CandidateIdentity
 
 
 class ContainmentState(StrEnum):
@@ -51,14 +66,15 @@ def classify_confirmation(graph: ConfirmedWaitForGraph) -> ConfirmationOutcome:
 
 @dataclass(frozen=True, slots=True)
 class SccObservation:
-    identity: CandidateIdentity
+    group: ProspectiveDeadlockGroup
     count: int
     evidence: tuple[ProspectiveDependency, ...]
 
 
 @dataclass(slots=True)
 class Containment:
-    identity: CandidateIdentity
+    trigger_core_identity: CandidateIdentity
+    scope_identity: CandidateIdentity
     state: ContainmentState = ContainmentState.DRAINING
     confirmation_tick: int | None = None
     outcome: ConfirmationOutcome | None = None
@@ -71,27 +87,30 @@ class Containment:
 @dataclass(frozen=True, slots=True)
 class DeadlockUpdate:
     observations: tuple[SccObservation, ...]
-    stable: tuple[CandidateIdentity, ...]
-    expired: tuple[CandidateIdentity, ...]
+    stable: tuple[ProspectiveDeadlockGroup, ...]
+    expired: tuple[ProspectiveDeadlockGroup, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class ConfirmationResult:
-    identity: CandidateIdentity
+    trigger_core_identity: CandidateIdentity
+    scope_identity: CandidateIdentity
     graph: ConfirmedWaitForGraph
     outcome: ConfirmationOutcome
 
 
 @dataclass(frozen=True, slots=True)
 class DeadlockCandidateSnapshot:
-    identity: CandidateIdentity
+    trigger_core_identity: CandidateIdentity
+    scope_identity: CandidateIdentity
     observation_count: int
     stable: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ContainmentSnapshot:
-    identity: CandidateIdentity
+    trigger_core_identity: CandidateIdentity
+    scope_identity: CandidateIdentity
     state: ContainmentState
     confirmation_tick: int | None
     outcome: ConfirmationOutcome | None
@@ -126,7 +145,9 @@ class DeadlockController:
     """
 
     stable_scc_observation_threshold: int = 2
-    _counts: dict[CandidateIdentity, int] = field(default_factory=dict, init=False)
+    _counts: dict[ProspectiveDeadlockGroup, int] = field(
+        default_factory=dict, init=False
+    )
     _active: Containment | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
@@ -144,17 +165,24 @@ class DeadlockController:
             threshold=self.stable_scc_observation_threshold,
             candidates=tuple(
                 DeadlockCandidateSnapshot(
-                    identity=identity,
+                    trigger_core_identity=group.trigger_core_identity,
+                    scope_identity=group.scope_identity,
                     observation_count=count,
-                    stable=active is not None and identity == active.identity,
+                    stable=(
+                        active is not None
+                        and group.scope_identity == active.scope_identity
+                        and group.trigger_core_identity
+                        == active.trigger_core_identity
+                    ),
                 )
-                for identity, count in sorted(self._counts.items())
+                for group, count in sorted(self._counts.items())
             ),
             containment=(
                 None
                 if active is None
                 else ContainmentSnapshot(
-                    identity=active.identity,
+                    trigger_core_identity=active.trigger_core_identity,
+                    scope_identity=active.scope_identity,
                     state=active.state,
                     confirmation_tick=active.confirmation_tick,
                     outcome=active.outcome,
@@ -177,43 +205,59 @@ class DeadlockController:
         if self._active is not None:
             return DeadlockUpdate((), (), ())
 
-        current: dict[CandidateIdentity, tuple[ProspectiveDependency, ...]] = {}
-        for members in cyclic_sccs(analysis):
-            identity = tuple(
-                (robot_id, plan_versions[robot_id]) for robot_id in members
+        edges = [
+            (dependency.waiting_robot_id, dependency.blocking_robot_id)
+            for dependency in analysis.dependencies
+        ]
+        current: dict[ProspectiveDeadlockGroup, tuple[ProspectiveDependency, ...]] = {}
+        for core_members in cyclic_sccs(analysis):
+            scope_members = affected_scope(edges, core_members)
+            group = ProspectiveDeadlockGroup(
+                trigger_core_identity=tuple(
+                    (robot_id, plan_versions[robot_id]) for robot_id in core_members
+                ),
+                scope_identity=tuple(
+                    (robot_id, plan_versions[robot_id]) for robot_id in scope_members
+                ),
             )
+            scope_set = set(scope_members)
             evidence = tuple(
                 dependency
                 for dependency in analysis.dependencies
-                if dependency.waiting_robot_id in members
-                and dependency.blocking_robot_id in members
+                if dependency.waiting_robot_id in scope_set
+                and dependency.blocking_robot_id in scope_set
             )
-            current[identity] = evidence
+            current[group] = evidence
 
         expired = tuple(sorted(set(self._counts) - set(current)))
-        for identity in expired:
-            del self._counts[identity]
+        for group in expired:
+            del self._counts[group]
 
-        stable: list[CandidateIdentity] = []
+        stable: list[ProspectiveDeadlockGroup] = []
         observations: list[SccObservation] = []
-        for identity in sorted(current):
-            count = self._counts.get(identity, 0) + 1
-            self._counts[identity] = count
-            observations.append(SccObservation(identity, count, current[identity]))
+        for group in sorted(current):
+            count = self._counts.get(group, 0) + 1
+            self._counts[group] = count
+            observations.append(SccObservation(group, count, current[group]))
             if (
                 self._active is None
                 and count >= self.stable_scc_observation_threshold
             ):
-                self._active = Containment(identity)
-                stable.append(identity)
+                self._active = Containment(
+                    trigger_core_identity=group.trigger_core_identity,
+                    scope_identity=group.scope_identity,
+                )
+                stable.append(group)
         return DeadlockUpdate(tuple(observations), tuple(stable), expired)
 
     def refresh(self, world: WorldState) -> CandidateIdentity | None:
-        """Drop the active incident if its scoped robots or plan versions changed.
+        """Drop the active incident if any scope robot or plan version changed.
 
+        The frozen affected scope (which includes the trigger core) is checked,
+        so an upstream blocked robot re-planning also invalidates the incident.
         Mutates controller state, so the control phase must call this explicitly;
         read-only observers (snapshot) never trigger it. Returns the invalidated
-        identity for event emission, or None.
+        scope identity for event emission, or None.
         """
         active = self._active
         if active is None:
@@ -223,23 +267,26 @@ class DeadlockController:
             or world.robots[robot_id].plan_version != version
             or robot_id not in world.plans
             or world.plans[robot_id].version != version
-            for robot_id, version in active.identity
+            for robot_id, version in active.scope_identity
         ):
             self._release()
-            return active.identity
+            return active.scope_identity
         return None
 
     def is_contained(self, plan: Plan) -> bool:
         active = self._active
-        return active is not None and (plan.robot_id, plan.version) in active.identity
+        return (
+            active is not None
+            and (plan.robot_id, plan.version) in active.scope_identity
+        )
 
     def newly_quiescent(self, world: WorldState) -> tuple[CandidateIdentity, ...]:
         active = self._active
         if active is None or active.state is not ContainmentState.DRAINING:
             return ()
-        if self._is_quiescent(world, active.identity):
+        if self._is_quiescent(world, active.scope_identity):
             active.state = ContainmentState.QUIESCENT
-            return (active.identity,)
+            return (active.scope_identity,)
         return ()
 
     @staticmethod
@@ -269,12 +316,17 @@ class DeadlockController:
         active = self._active
         if active is None or active.state is not ContainmentState.QUIESCENT:
             return None
-        graph = build_confirmed_wait_for(world, active.identity, tick=tick)
+        graph = build_confirmed_wait_for(world, active.scope_identity, tick=tick)
         outcome = classify_confirmation(graph)
         active.confirmation_tick = tick
         active.outcome = outcome
         active.confirmed_graph = graph
-        result = ConfirmationResult(active.identity, graph, outcome)
+        result = ConfirmationResult(
+            trigger_core_identity=active.trigger_core_identity,
+            scope_identity=active.scope_identity,
+            graph=graph,
+            outcome=outcome,
+        )
         if outcome is ConfirmationOutcome.CONFIRMED_DEADLOCK:
             active.state = ContainmentState.CONFIRMED_DEADLOCK
         elif outcome is ConfirmationOutcome.UNSUPPORTED_EXTERNAL:

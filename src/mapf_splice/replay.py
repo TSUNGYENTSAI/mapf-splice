@@ -144,7 +144,7 @@ def _recovery(containment) -> dict[str, Any] | None:
     return {
         "state": containment.recovery_state.value,
         "failure_reason": failure.reason.value if failure else None,
-        "participants": [robot_id for robot_id, _ in containment.identity],
+        "participants": [robot_id for robot_id, _ in containment.scope_identity],
         "starts": [],
         "goals": [],
         "solver": None,
@@ -184,7 +184,7 @@ class FrameRecorder:
         committed_refs = set(world.reservations.all_committed_actions())
         containment = controller_state.containment
         contained_members = (
-            set(containment.identity) if containment is not None else set()
+            set(containment.scope_identity) if containment is not None else set()
         )
         robots = []
         for robot_id, robot in sorted(world.robots.items()):
@@ -308,7 +308,8 @@ class FrameRecorder:
                     "threshold": controller_state.threshold,
                     "candidates": [
                         {
-                            "identity": _identity(item.identity),
+                            "trigger_core": _identity(item.trigger_core_identity),
+                            "scope": _identity(item.scope_identity),
                             "observation_count": item.observation_count,
                             "stable": item.stable,
                         }
@@ -318,7 +319,10 @@ class FrameRecorder:
                         None
                         if containment is None
                         else {
-                            "identity": _identity(containment.identity),
+                            "trigger_core": _identity(
+                                containment.trigger_core_identity
+                            ),
+                            "scope": _identity(containment.scope_identity),
                             "state": containment.state.value,
                             "confirmation_tick": containment.confirmation_tick,
                             "outcome": (
@@ -329,8 +333,10 @@ class FrameRecorder:
                         }
                     ),
                     "newly_stable": [
-                        _identity(value)
-                        for value in (deadlock_update.stable if deadlock_update else ())
+                        _identity(group.scope_identity)
+                        for group in (
+                            deadlock_update.stable if deadlock_update else ()
+                        )
                     ],
                 },
                 "confirmed_wait_for": (

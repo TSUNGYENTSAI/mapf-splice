@@ -69,9 +69,10 @@ function renderGraph(frame){
   $('graph').innerHTML=`<svg viewBox="0 0 320 152">${svg}</svg>`;
   $('edgeCount').textContent=`${frame.preview.dependencies.length} edges`;
   const containment=frame.deadlock.containment;
-  const containmentId=containment?containment.identity.map(x=>x.robot_id+'@'+x.plan_version).join(','):null;
+  const idLabel=ids=>ids.map(x=>x.robot_id+'@'+x.plan_version).join(',');
+  const containmentScope=containment?idLabel(containment.scope):null;
   const quiescentStates=['quiescent','confirmed-deadlock','unsupported'];
-  $('sccs').innerHTML=frame.deadlock.candidates.map(c=>{const id=c.identity.map(x=>x.robot_id+'@'+x.plan_version).join(',');const state=id===containmentId?containment.state:null;return `<div class="scc ${c.stable?'stable':''} ${state&&quiescentStates.includes(state)?'quiescent':''}"><strong>${esc(id)}</strong>observation ${c.observation_count} / ${frame.deadlock.threshold}<br>${c.stable?'stable · ':''}${state?'state '+esc(state):''}</div>`}).join('')||'<div class="scc"><strong>No cyclic SCC</strong>Current preview evidence is acyclic.</div>';
+  $('sccs').innerHTML=frame.deadlock.candidates.map(c=>{const core=idLabel(c.trigger_core),scope=idLabel(c.scope);const state=scope===containmentScope?containment.state:null;return `<div class="scc ${c.stable?'stable':''} ${state&&quiescentStates.includes(state)?'quiescent':''}"><strong>Cycle core ${esc(core)}</strong>Affected scope ${esc(scope)}<br>observation ${c.observation_count} / ${frame.deadlock.threshold}${c.stable?' · stable':''}${state?' · state '+esc(state):''}</div>`}).join('')||'<div class="scc"><strong>No cycle core</strong>Current preview evidence is acyclic.</div>';
 }
 function renderConfirmed(frame){
   const g=frame.confirmed_wait_for;

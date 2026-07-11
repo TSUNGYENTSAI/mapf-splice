@@ -50,10 +50,15 @@ def test_hero_confirms_and_proposes_over_full_scope(horizon: int) -> None:
     assert quiescence[0].tick == 18
     assert containment.confirmation_tick == 18
     assert containment.state is ContainmentState.CONFIRMED_DEADLOCK
-    assert containment.identity == EXPECTED_SCOPE
+    # Prospective trigger core and affected scope both span all three robots
+    # (the hero forms a prospective 3-cycle); the confirmed cycle is smaller.
+    assert containment.scope_identity == EXPECTED_SCOPE
+    assert containment.trigger_core_identity == EXPECTED_SCOPE
 
-    # Confirmed graph: 3 edges, cyclic SCC is R1<->R2, R3 transitively blocked.
+    # Confirmed graph over the full scope: 3 edges, cyclic SCC is only R1<->R2,
+    # R3 transitively blocked (confirmed cycle smaller than the scope).
     graph = containment.confirmed_graph
+    assert {(m[0]) for m in graph.scope} == {"R1", "R2", "R3"}
     assert len(graph.edges) == 3
     assert graph.cyclic_sccs == (("R1", "R2"),)
     assert "R3" not in {r for scc in graph.cyclic_sccs for r in scc}
@@ -62,7 +67,7 @@ def test_hero_confirms_and_proposes_over_full_scope(horizon: int) -> None:
     assert containment.recovery_state is RecoveryState.PROPOSAL_READY
     proposal = containment.recovery_proposal
     assert isinstance(proposal, RecoveryProposal)
-    assert proposal.identity == EXPECTED_SCOPE
+    assert proposal.scope_identity == EXPECTED_SCOPE
     assert set(proposal.plans) == {"R1", "R2", "R3"}
     assert set(proposal.solution.robot_ids) == {"R1", "R2", "R3"}
 
@@ -128,8 +133,8 @@ def test_recovery_planning_is_read_only_snapshot_parity(horizon: int) -> None:
     before = snapshot()
     # Re-run the planner explicitly (the runtime already ran it once); it must
     # neither install plans nor mutate any authoritative state.
-    identity = sim.deadlock_controller.containment.identity
-    result = plan_recovery(world, identity, sim.warehouse_map)
+    scope_identity = sim.deadlock_controller.containment.scope_identity
+    result = plan_recovery(world, scope_identity, sim.warehouse_map)
     assert isinstance(result, RecoveryProposal)
     assert snapshot() == before
     # Deterministic: the re-run matches the runtime's stored proposal.

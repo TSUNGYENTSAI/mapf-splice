@@ -136,7 +136,7 @@ def test_proposal_holds_validated_paths_and_plans() -> None:
         ),
     }
     proposal = RecoveryProposal(
-        identity=(("R1", 2), ("R2", 2)),
+        scope_identity=(("R1", 2), ("R2", 2)),
         expected_plan_versions={"R1": 2, "R2": 2},
         starts={"R1": Cell(0, 0), "R2": Cell(0, 3)},
         goals={"R1": Cell(0, 1), "R2": Cell(0, 2)},
